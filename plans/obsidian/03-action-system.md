@@ -2,13 +2,19 @@
 
 ## Overview
 
-Actions are the executable units that the agent performs. Each action has a type, parameters, lifecycle, and execution semantics.
+Actions are tasks that Claude Code executes. Each action type maps to Claude Code's native tools - no custom handlers needed.
 
-## Built-in Action Types
+| Action Type | Claude Code Tool | Description |
+|-------------|------------------|-------------|
+| `shell` | Bash tool | Execute shell commands |
+| `http` | Bash + curl | Make HTTP requests |
+| `file` | Read/Edit/Write | File operations |
+| `notify` | Bash + curl | Send notifications |
+| `agent` | (recursive) | Delegate to another Claude invocation |
 
-### Shell Actions
+## Shell Actions
 
-Execute shell commands.
+Execute shell commands using Claude Code's Bash tool.
 
 ```markdown
 ### [MEDIUM] Run backup script
@@ -17,23 +23,38 @@ Execute shell commands.
 - **command**: ./scripts/backup.sh --full
 - **working_dir**: /app
 - **timeout**: 10m
-- **env**:
-  - BACKUP_TARGET: s3://bucket/backups
-- **status**: pending
+- **status**: PENDING
 ```
+
+Claude Code executes this by calling its Bash tool with the command.
 
 **Parameters:**
 | Param | Required | Description |
 |-------|----------|-------------|
 | `command` | Yes | Shell command to execute |
-| `working_dir` | No | Working directory |
+| `working_dir` | No | Working directory (Claude uses `cd` first) |
 | `timeout` | No | Max execution time |
-| `env` | No | Environment variables |
-| `shell` | No | Shell to use (default: /bin/sh) |
+| `env` | No | Environment variables (Claude sets these) |
 
-### HTTP Actions
+### Examples
 
-Make HTTP requests.
+```markdown
+### [HIGH] Check disk space
+- **id**: disk-check
+- **type**: shell
+- **command**: df -h / | awk 'NR==2 {print $5}' | grep -q "^[89][0-9]%" && echo "WARNING: Disk usage high"
+- **status**: PENDING
+
+### [LOW] Cleanup temp files
+- **id**: temp-cleanup
+- **type**: shell
+- **command**: find /tmp -user $USER -mtime +7 -delete
+- **status**: PENDING
+```
+
+## HTTP Actions
+
+Make HTTP requests using curl via Claude Code's Bash tool.
 
 ```markdown
 ### [HIGH] Health check
@@ -45,7 +66,14 @@ Make HTTP requests.
   - Authorization: Bearer ${API_TOKEN}
 - **expect_status**: 200
 - **timeout**: 30s
-- **status**: pending
+- **status**: PENDING
+```
+
+Claude Code converts this to a curl command:
+```bash
+curl -X GET "https://api.example.com/health" \
+  -H "Authorization: Bearer ${API_TOKEN}" \
+  -w "%{http_code}" -o /dev/null -s
 ```
 
 **Parameters:**
@@ -54,98 +82,158 @@ Make HTTP requests.
 | `url` | Yes | Request URL |
 | `method` | No | HTTP method (default: GET) |
 | `headers` | No | Request headers |
-| `body` | No | Request body |
+| `body` | No | Request body (for POST/PUT) |
 | `expect_status` | No | Expected status code |
-| `expect_body` | No | Expected response pattern |
+| `timeout` | No | Request timeout |
 
-### File Actions
-
-File system operations.
+### Examples
 
 ```markdown
-### [LOW] Clean temp files
-- **id**: clean-001
+### [HIGH] POST to webhook
+- **id**: webhook-post
+- **type**: http
+- **method**: POST
+- **url**: https://hooks.slack.com/services/XXX
+- **headers**:
+  - Content-Type: application/json
+- **body**: '{"text": "Heartbeat alive"}'
+- **status**: PENDING
+
+### [MEDIUM] Check API response
+- **id**: api-check
+- **type**: http
+- **url**: https://api.example.com/status
+- **expect_status**: 200
+- **expect_body**: '"status":"ok"'
+- **status**: PENDING
+```
+
+## File Actions
+
+File operations using Claude Code's Read/Edit/Write tools.
+
+```markdown
+### [LOW] Archive old logs
+- **id**: archive-logs
 - **type**: file
-- **operation**: delete
-- **pattern**: /tmp/agent-*.log
+- **operation**: move
+- **source**: ./logs/*.log
+- **destination**: ./archive/
 - **older_than**: 7d
-- **status**: pending
+- **status**: PENDING
+```
+
+Claude Code uses shell commands for complex file operations:
+```bash
+find ./logs -name "*.log" -mtime +7 -exec mv {} ./archive/ \;
 ```
 
 **Operations:**
-- `read` - Read file content
-- `write` - Write content to file
-- `delete` - Delete files matching pattern
-- `copy` - Copy files
-- `move` - Move files
-- `watch` - Watch for changes (triggers other actions)
+- `read` - Read file content (Claude uses Read tool)
+- `write` - Write content to file (Claude uses Write tool)
+- `append` - Append to file (Claude uses Edit or shell `>>`)
+- `delete` - Delete files (Claude uses `rm`)
+- `move` - Move files (Claude uses `mv`)
+- `copy` - Copy files (Claude uses `cp`)
 
-### Agent Actions
-
-Delegate to AI agent.
+### Examples
 
 ```markdown
-### [MEDIUM] Summarize daily logs
-- **id**: summarize-001
-- **type**: agent
-- **prompt**: |
-    Review the logs in /var/log/app/ from today.
-    Summarize any errors or warnings.
-    Write summary to /reports/daily-$(date +%Y%m%d).md
-- **model**: claude-3-sonnet
-- **max_tokens**: 4096
-- **status**: pending
+### [MEDIUM] Create daily report
+- **id**: daily-report
+- **type**: file
+- **operation**: write
+- **path**: ./reports/daily-$(date +%Y%m%d).md
+- **content**: |
+  # Daily Report - $(date)
+
+  ## Summary
+  Actions executed: ${action_count}
+  Failures: ${failure_count}
+- **status**: PENDING
+
+### [LOW] Cleanup old reports
+- **id**: report-cleanup
+- **type**: file
+- **operation**: delete
+- **pattern**: ./reports/daily-*.md
+- **older_than**: 30d
+- **status**: PENDING
 ```
 
-**Parameters:**
-| Param | Required | Description |
-|-------|----------|-------------|
-| `prompt` | Yes | Task prompt for agent |
-| `model` | No | Model to use |
-| `max_tokens` | No | Response limit |
-| `tools` | No | Allowed tools |
-| `context_files` | No | Files to include in context |
+## Notification Actions
 
-### Notification Actions
-
-Send notifications.
+Send notifications via external services.
 
 ```markdown
 ### [HIGH] Alert on failure
 - **id**: alert-001
 - **type**: notify
 - **channel**: slack
-- **target**: #alerts
+- **webhook**: ${SLACK_WEBHOOK}
 - **message**: |
-    :warning: Action ${failed_action} failed
-    Error: ${error_message}
+  :warning: Action failed
+  Error: ${last_error}
 - **condition**: any_failed
-- **status**: pending
+- **status**: PENDING
 ```
 
+Claude Code converts this to a curl command targeting the webhook.
+
 **Channels:**
-- `slack` - Slack webhook
-- `discord` - Discord webhook
-- `telegram` - Telegram bot
-- `email` - SMTP email
-- `webhook` - Generic webhook
+| Channel | Implementation |
+|---------|----------------|
+| `slack` | curl POST to Slack webhook |
+| `discord` | curl POST to Discord webhook |
+| `telegram` | curl POST to Telegram Bot API |
+| `email` | curl to email API (Mailgun, SendGrid, etc.) |
+| `webhook` | curl to any generic webhook |
 
-### Composite Actions
+### Examples
 
-Group multiple actions.
+```markdown
+### [MEDIUM] Daily Slack summary
+- **id**: slack-summary
+- **type**: notify
+- **channel**: slack
+- **webhook**: ${SLACK_WEBHOOK}
+- **message**: |
+  :heartbeat: Daily Heartbeat Summary
+  - Actions completed: ${completed_count}
+  - Failures: ${failure_count}
+  - Next check: ${next_wake}
+- **schedule**: daily:09:00
+- **status**: PENDING
+
+### [HIGH] Telegram alert
+- **id**: telegram-alert
+- **type**: notify
+- **channel**: telegram
+- **bot_token**: ${TELEGRAM_BOT_TOKEN}
+- **chat_id**: ${TELEGRAM_CHAT_ID}
+- **message**: "Critical failure detected!"
+- **condition**: any_critical_failed
+- **status**: PENDING
+```
+
+## Composite Actions
+
+Group multiple actions together.
 
 ```markdown
 ### [MEDIUM] Daily maintenance
 - **id**: maint-001
 - **type**: composite
 - **actions**:
-  - clean-temp
+  - cleanup-temp
   - rotate-logs
-  - update-stats
-- **mode**: sequential | parallel
-- **fail_fast**: true
-- **status**: pending
+  - backup-db
+- **mode**: sequential
+- **fail_fast**: false
+- **status**: PENDING
 ```
+
+Claude Code executes each sub-action in order, checking for failures based on `fail_fast` setting.
 
 ## Execution Lifecycle
 
@@ -153,117 +241,69 @@ Group multiple actions.
 ┌──────────┐
 │ PENDING  │
 └────┬─────┘
-     │ schedule due & deps met & condition true
+     │ Claude reads heartbeat.md
      ▼
 ┌──────────┐
-│ RUNNING  │
+│ RUNNING  │  (Claude updates status)
 └────┬─────┘
      │
      ├─── success ──────────────▶ ┌───────────┐
      │                            │ COMPLETED │
      │                            └───────────┘
      │
-     └─── failure ──┬── retries left ──▶ ┌──────────┐
-                    │                    │ PENDING  │ (retry scheduled)
-                    │                    └──────────┘
+     └─── failure ──┬── retries left ──▶ Keep PENDING
+                    │                    (increment retry_count)
                     │
                     └── no retries ────▶ ┌──────────┐
                                          │  FAILED  │
                                          └──────────┘
 ```
 
-### Lifecycle Hooks
+Claude Code manages this lifecycle automatically based on the instructions in CLAUDE.md.
 
-```python
-class ActionExecutor:
-    def execute(self, action: Action) -> Result:
-        # Pre-execution
-        self.on_start(action)
-        self.update_status(action, 'running')
+## Dependencies
 
-        try:
-            # Execute with timeout
-            result = self.run_with_timeout(action)
-
-            # Post-execution
-            self.on_success(action, result)
-            self.update_status(action, 'completed', result=result)
-            return result
-
-        except TimeoutError:
-            self.on_timeout(action)
-            return self.handle_retry(action, 'timeout')
-
-        except Exception as e:
-            self.on_error(action, e)
-            return self.handle_retry(action, str(e))
-```
-
-## Dependency Management
-
-### Explicit Dependencies
+Actions can depend on other actions:
 
 ```markdown
 ### [HIGH] Create database
 - **id**: create-db
 - **type**: shell
 - **command**: createdb myapp
-- **status**: pending
+- **status**: PENDING
 
 ### [HIGH] Run migrations
 - **id**: run-migrations
 - **type**: shell
 - **command**: ./migrate.sh
 - **depends_on**: create-db
-- **status**: blocked
+- **status**: PENDING
 ```
 
-### Dependency Resolution
+Claude Code checks if `create-db` is COMPLETED before executing `run-migrations`.
 
-```python
-def resolve_dependencies(actions: List[Action]) -> List[Action]:
-    graph = build_dependency_graph(actions)
+## Conditions
 
-    # Topological sort
-    resolved = []
-    while graph.has_nodes():
-        # Find actions with no pending dependencies
-        ready = [a for a in graph.nodes()
-                 if all(d.status == 'completed' for d in graph.deps(a))]
+Actions can have conditions:
 
-        if not ready:
-            raise CircularDependencyError(graph.remaining())
-
-        resolved.extend(sorted(ready, key=lambda a: a.priority))
-        graph.remove(ready)
-
-    return resolved
+```markdown
+### [MEDIUM] Alert if disk full
+- **id**: disk-alert
+- **type**: notify
+- **channel**: slack
+- **message**: "Disk space critical!"
+- **condition**: disk_usage > 90%
+- **status**: PENDING
 ```
 
-## Condition Expressions
+Claude Code evaluates conditions before executing. Common conditions:
+- `any_failed` - Any action failed this run
+- `all_completed` - All actions completed
+- `file_exists:/path` - File exists
+- `time_after:09:00` - Current time after 09:00
+- `weekday:mon,tue,wed` - Current day is Mon, Tue, or Wed
 
-```yaml
-# Simple conditions
-condition: file_exists:/path/to/file
-condition: env_set:API_KEY
-condition: time_after:09:00
-condition: time_before:17:00
-condition: weekday:mon,tue,wed,thu,fri
-
-# Action result conditions
-condition: action_completed:prev-action
-condition: action_failed:check-health
-condition: any_failed
-condition: all_completed
-
-# Composite conditions
-condition: |
-  file_exists:/tmp/trigger AND
-  time_after:09:00 AND
-  NOT action_failed:critical-check
-```
-
-## Retry Policies
+## Retry Behavior
 
 ```markdown
 ### [HIGH] Flaky API call
@@ -271,87 +311,37 @@ condition: |
 - **type**: http
 - **url**: https://flaky.example.com/api
 - **retry**: 3
-- **retry_delay**: exponential:1s,30s
-- **retry_on**:
-  - status:5xx
-  - timeout
-  - connection_error
-- **status**: pending
+- **retry_delay**: 30s
+- **status**: PENDING
 ```
 
-**Retry Strategies:**
-| Strategy | Format | Behavior |
-|----------|--------|----------|
-| Fixed | `fixed:5s` | Wait 5s between retries |
-| Linear | `linear:5s` | 5s, 10s, 15s... |
-| Exponential | `exponential:1s,60s` | 1s, 2s, 4s... max 60s |
-| Immediate | `immediate` | Retry immediately |
+If the action fails, Claude Code keeps it as PENDING and increments `retry_count`. On the next invocation (or after delay), it retries up to the `retry` limit.
 
-## Output Handling
+## Variable Substitution
 
-### Capturing Output
+Claude Code understands these variables in action definitions:
 
-```markdown
-### [MEDIUM] Get server status
-- **id**: status-001
-- **type**: shell
-- **command**: ./status.sh
-- **capture_output**: true
-- **output_file**: /tmp/status-output.txt
-- **status**: pending
-```
+| Variable | Meaning |
+|----------|---------|
+| `${date}` | Current date (YYYY-MM-DD) |
+| `${time}` | Current time (HH:MM:SS) |
+| `${timestamp}` | ISO 8601 timestamp |
+| `${last_error}` | Last error message |
+| `${action_count}` | Number of actions this run |
+| `${completed_count}` | Completed actions this run |
+| `${failure_count}` | Failed actions this run |
+| `${ENV_VAR}` | Environment variable |
 
-### Using Output in Subsequent Actions
+## Best Practices
 
-```markdown
-### [MEDIUM] Process status
-- **id**: process-001
-- **type**: agent
-- **prompt**: |
-    Analyze the server status:
-    ${output:status-001}
-
-    Identify any concerning metrics.
-- **depends_on**: status-001
-- **status**: blocked
-```
-
-## Action Templates
-
-Create reusable action patterns in [[templates/action-template]].
-
-```markdown
-### Template: Health Check
-- **id**: health-${service}
-- **type**: http
-- **method**: GET
-- **url**: ${endpoint}/health
-- **expect_status**: 200
-- **timeout**: 30s
-- **retry**: 3
-- **on_failure**: notify:slack:#alerts
-```
-
-## Custom Action Types
-
-Extend with custom handlers:
-
-```python
-# actions/custom_handlers.py
-
-@action_handler('database')
-class DatabaseAction(ActionHandler):
-    def execute(self, params: dict) -> Result:
-        operation = params['operation']
-
-        if operation == 'query':
-            return self.run_query(params['sql'])
-        elif operation == 'backup':
-            return self.run_backup(params['target'])
-        # ...
-```
+1. **Use shell for most tasks** - Most flexible, Claude handles it well
+2. **Be explicit about timeouts** - Prevents hung actions
+3. **Include meaningful IDs** - Easier to track in logs
+4. **Use conditions sparingly** - Keep logic simple
+5. **Test actions manually first** - Verify commands work before adding to heartbeat
 
 ## Next Steps
 
-- [[04-implementation-phases]] - Implementation roadmap
+- [[02-heartbeat-mechanism]] - heartbeat.md format
+- [[04-implementation-phases]] - Setup guide
 - [[templates/action-template]] - Action templates

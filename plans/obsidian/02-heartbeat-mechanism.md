@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `heartbeat.md` file is the central control file for the agent. It defines pending actions, tracks status, and maintains execution history. The file is human-readable and editable, following a structured markdown format.
+The `heartbeat.md` file is the central control file for the agent. Claude Code reads this file directly on each invocation - no custom parsing code is needed. The file is human-readable and editable, following a structured markdown format that Claude understands natively.
 
 ## File Format
 
@@ -22,17 +22,17 @@ status: idle
 
 ### [HIGH] Check API health
 - **id**: action-001
-- **type**: http_check
+- **type**: http
 - **target**: https://api.example.com/health
 - **schedule**: every:5m
-- **status**: pending
+- **status**: PENDING
 
 ### [MEDIUM] Sync database backup
 - **id**: action-002
 - **type**: shell
 - **command**: ./scripts/backup.sh
 - **schedule**: daily:02:00
-- **status**: pending
+- **status**: PENDING
 
 ## Completed Today
 
@@ -49,13 +49,14 @@ Agent initialized successfully.
 ---
 version: 1                        # Schema version
 last_wake: 2024-01-15T10:30:00Z   # Last execution timestamp
-next_wake: 2024-01-15T10:35:00Z   # Scheduled next wake
+next_wake: 2024-01-15T10:35:00Z   # Scheduled next wake (informational)
 status: idle | running | error    # Current agent status
 error_count: 0                    # Consecutive errors
 last_error: null                  # Last error message
-config_hash: abc123               # Config file hash for change detection
 ---
 ```
+
+**Note**: Claude Code updates this frontmatter automatically. No custom code needed.
 
 ## Action Block Format
 
@@ -64,8 +65,8 @@ Each action is a level-3 heading with structured content:
 ```markdown
 ### [PRIORITY] Action Name
 - **id**: unique-identifier
-- **type**: action_type
-- **status**: pending | running | completed | failed | skipped
+- **type**: shell | http | file | notify
+- **status**: PENDING | RUNNING | COMPLETED | FAILED | SKIPPED
 - **schedule**: schedule_expression (optional)
 - **retry**: max_attempts (optional, default: 1)
 - **timeout**: duration (optional, default: 5m)
@@ -80,145 +81,98 @@ Each action is a level-3 heading with structured content:
 
 | Priority | Label | Behavior |
 |----------|-------|----------|
-| Critical | `[CRITICAL]` | Execute immediately, block on failure |
-| High | `[HIGH]` | Execute first, continue on failure |
+| Critical | `[CRITICAL]` | Execute first, stop on failure |
+| High | `[HIGH]` | Execute early, continue on failure |
 | Medium | `[MEDIUM]` | Standard execution order |
 | Low | `[LOW]` | Execute if time permits |
 | Background | `[BG]` | Non-blocking, async execution |
+
+Claude Code understands these priorities and executes accordingly.
 
 ### Status Values
 
 | Status | Meaning |
 |--------|---------|
-| `pending` | Awaiting execution |
-| `running` | Currently executing |
-| `completed` | Successfully finished |
-| `failed` | Execution failed |
-| `skipped` | Skipped due to condition/dependency |
-| `blocked` | Waiting on dependency |
+| `PENDING` | Awaiting execution |
+| `RUNNING` | Currently executing (set by Claude) |
+| `COMPLETED` | Successfully finished |
+| `FAILED` | Execution failed |
+| `SKIPPED` | Skipped due to condition/dependency |
+| `NEEDS_CLARIFICATION` | Claude couldn't understand the action |
 
 ## Schedule Expressions
 
-### Supported Formats
+Claude Code interprets these schedule expressions:
 
 ```yaml
 # One-time (ISO 8601)
 schedule: at:2024-01-15T14:00:00Z
 
-# Interval
+# Interval-based
 schedule: every:5m
 schedule: every:1h
 schedule: every:30s
-
-# Cron expression
-schedule: cron:*/5 * * * *
-schedule: cron:0 2 * * *
 
 # Named schedules
 schedule: daily:02:00
 schedule: hourly
 schedule: startup
-schedule: on_change:path/to/watch
+schedule: weekdays:09:00
 ```
 
-### Schedule Evaluation
+Claude Code checks the current time and `last_wake` to determine if a scheduled action is due.
 
-```
-Current Time: 10:32:00
+## How Claude Code Processes This File
 
-Action A (every:5m, last_run: 10:30:00) → Due at 10:35:00 → SKIP
-Action B (every:5m, last_run: 10:25:00) → Due at 10:30:00 → EXECUTE
-Action C (cron:*/10 * * * *, last_run: 10:20:00) → Due at 10:30:00 → EXECUTE
-```
+When Claude Code is invoked with "Process heartbeat", it:
 
-## Parsing Algorithm
+1. **Reads heartbeat.md** using its Read tool
+2. **Parses the content** using its natural language understanding
+3. **Identifies PENDING actions** and their priorities
+4. **Checks schedules** against current time
+5. **Executes each action** using appropriate tools (Bash, Edit, etc.)
+6. **Updates the file** with new status using Edit tool
+7. **Logs to history** using Write tool
 
-```python
-def parse_heartbeat(content: str) -> HeartbeatState:
-    # 1. Extract frontmatter
-    frontmatter = extract_yaml_frontmatter(content)
-
-    # 2. Find action blocks
-    actions = []
-    for block in find_h3_blocks(content):
-        action = parse_action_block(block)
-        if action.status == 'pending':
-            if is_due(action.schedule):
-                if check_dependencies(action, actions):
-                    if evaluate_condition(action.condition):
-                        actions.append(action)
-
-    # 3. Sort by priority
-    actions.sort(key=lambda a: PRIORITY_ORDER[a.priority])
-
-    return HeartbeatState(
-        metadata=frontmatter,
-        actions=actions
-    )
-```
+**No custom parser needed** - Claude understands markdown natively.
 
 ## Update Operations
 
-### Mark Action Complete
+### Mark Action Complete (done by Claude)
 
 ```markdown
 # Before
 ### [HIGH] Check API health
 - **id**: action-001
-- **status**: pending
+- **status**: PENDING
 
-# After
+# After (Claude updates this)
 ### [HIGH] Check API health
 - **id**: action-001
-- **status**: completed
+- **status**: COMPLETED
 - **completed_at**: 2024-01-15T10:32:15Z
 - **duration**: 1.2s
 - **result**: OK (200)
 ```
 
-### Handle Failure
+### Handle Failure (done by Claude)
 
 ```markdown
 ### [HIGH] Check API health
 - **id**: action-001
-- **status**: failed
+- **status**: FAILED
 - **failed_at**: 2024-01-15T10:32:15Z
 - **error**: Connection timeout after 30s
 - **retry_count**: 2/3
-- **next_retry**: 2024-01-15T10:37:15Z
 ```
 
-## File Locking
+## Concurrency Note
 
-To prevent concurrent modifications:
+Since Claude Code processes heartbeat.md synchronously in a single invocation, file locking is typically not needed. The scheduler should ensure only one instance runs at a time (cron handles this by default).
 
-```python
-def update_heartbeat(path: str, updates: dict):
-    lock_path = path + '.lock'
-
-    with file_lock(lock_path, timeout=30):
-        content = read_file(path)
-        state = parse_heartbeat(content)
-
-        # Apply updates
-        for action_id, changes in updates.items():
-            state.update_action(action_id, changes)
-
-        # Write atomically
-        write_atomic(path, state.render())
-```
-
-## Backup and Recovery
-
-```bash
-# Automatic backup before each wake
-cp heartbeat.md history/heartbeat-$(date +%Y%m%d-%H%M%S).md
-
-# Recovery from corruption
-if ! validate_heartbeat heartbeat.md; then
-    cp history/heartbeat-latest-valid.md heartbeat.md
-fi
-```
+If you need concurrent access:
+- Use systemd's `ExecStart` with `flock`
+- Or ensure cron jobs don't overlap with reasonable intervals
 
 ## Examples
 
@@ -238,15 +192,70 @@ status: idle
 - **id**: hello-001
 - **type**: shell
 - **command**: echo "Agent is alive"
-- **schedule**: every:1h
-- **status**: pending
+- **status**: PENDING
 ```
 
-### Complex heartbeat.md
+### Production heartbeat.md
 
-See [[templates/action-template]] for more examples.
+```markdown
+---
+version: 1
+last_wake: 2024-01-15T10:30:00Z
+status: idle
+---
+
+# Heartbeat
+
+## Pending Actions
+
+### [CRITICAL] Database health check
+- **id**: db-health
+- **type**: shell
+- **command**: pg_isready -h localhost
+- **schedule**: every:5m
+- **status**: PENDING
+
+### [HIGH] API endpoint monitor
+- **id**: api-monitor
+- **type**: shell
+- **command**: curl -sf https://api.example.com/health || exit 1
+- **schedule**: every:5m
+- **status**: PENDING
+
+### [MEDIUM] Daily backup
+- **id**: daily-backup
+- **type**: shell
+- **command**: ./scripts/backup.sh
+- **schedule**: daily:03:00
+- **status**: PENDING
+
+### [LOW] Cleanup old logs
+- **id**: log-cleanup
+- **type**: shell
+- **command**: find ./logs -mtime +7 -delete
+- **schedule**: daily:04:00
+- **status**: PENDING
+
+## Completed Today
+
+- [x] db-health: OK (10:30:00)
+- [x] api-monitor: OK (10:30:05)
+
+## Notes
+
+System running normally.
+```
+
+## Best Practices
+
+1. **Keep it concise** - Claude reads the entire file each invocation
+2. **Use clear action names** - Helps Claude understand intent
+3. **Include error context** - If manually fixing failed actions
+4. **Archive completed actions** - Move to Completed Today section
+5. **Use meaningful IDs** - Makes logs easier to follow
 
 ## Next Steps
 
-- [[03-action-system]] - Define action types and execution
-- [[06-configuration]] - Agent configuration options
+- [[03-action-system]] - Action types Claude Code can execute
+- [[04-implementation-phases]] - Setup guide
+- [[templates/action-template]] - Action templates

@@ -1,13 +1,15 @@
-# OpenClaw Integration
+# OpenClaw Integration (Optional)
 
 ## Overview
 
+**Note**: OpenClaw integration is **optional**. The core heartbeat system works with just Claude Code + cron. OpenClaw adds messaging capabilities if you want chat-based interaction.
+
 [OpenClaw](https://docs.openclaw.ai/) is a multi-platform messaging gateway that bridges communication channels with AI agents. Integrating the heartbeat agent with OpenClaw enables:
 
-- **Scheduled execution** via OpenClaw's cron system
-- **Channel notifications** to Slack, Discord, Telegram, etc.
-- **Message-driven actions** from chat commands
-- **Session management** with context persistence
+- **Alternative scheduling** via OpenClaw's cron system (instead of system cron)
+- **Chat-driven actions** - Add actions via Slack/Discord/Telegram messages
+- **Richer notifications** - Native channel integration
+- **Session persistence** - Maintain conversation context
 
 ## OpenClaw Architecture
 
@@ -138,70 +140,58 @@ Configure a dedicated session for the heartbeat agent:
 
 ## Bootstrap Files
 
-OpenClaw injects bootstrap files on first session. Configure these for the heartbeat agent:
+When using OpenClaw, these files work alongside your Claude Code configuration:
 
-### AGENTS.md
+| File | Purpose | Used By |
+|------|---------|---------|
+| `CLAUDE.md` | Agent instructions | Claude Code (primary) |
+| `soul.md` | Agent persona | Claude Code (read on startup) |
+| `AGENTS.md` | OpenClaw-specific instructions | OpenClaw (optional) |
+
+**Note**: If using Claude Code directly (recommended), your `CLAUDE.md` and `soul.md` files (see [[06-configuration]]) serve the same purpose as OpenClaw's bootstrap files.
+
+### AGENTS.md (OpenClaw-specific)
+
+If using OpenClaw scheduling instead of system cron:
 
 ```markdown
 # Heartbeat Agent
 
 You are an autonomous agent that manages scheduled tasks.
 
-## Primary Responsibilities
+## On Each Wake
 
-1. Read heartbeat.md on each wake
-2. Execute pending actions in priority order
-3. Update action statuses
-4. Report failures
+1. Read heartbeat.md for pending actions
+2. Execute in priority order (CRITICAL > HIGH > MEDIUM > LOW)
+3. Update statuses in heartbeat.md
+4. Log to history/
 
-## Workspace
-
-- `heartbeat.md` - Current actions
-- `config.yaml` - Configuration
-- `history/` - Execution logs
-
-## Behavior Rules
+## Rules
 
 - Always check dependencies before executing
-- Never skip CRITICAL priority actions
-- Log all executions to history
-- Notify on failures (if configured)
+- Stop on CRITICAL action failure
+- Continue on HIGH/MEDIUM/LOW failures
+- Log all executions with timestamps
 ```
 
-### SOUL.md
+### soul.md (Works with both)
+
+This file is read by Claude Code on startup (same content works for OpenClaw):
 
 ```markdown
-# Persona
+# Soul - Heartbeat Agent
 
-You are a reliable, efficient task executor. You:
-- Prioritize reliability over speed
-- Report issues clearly
-- Never make assumptions about unclear tasks
-- Ask for clarification when needed
+You are a reliable, efficient task executor.
 
-## Communication Style
+## Values
+- Reliability over speed
+- Clarity over brevity
+- Safety over convenience
 
+## Communication
 - Brief, factual updates
 - Clear error messages
 - Structured output
-```
-
-### TOOLS.md
-
-```markdown
-# Available Tools
-
-## Always Available
-- read - Read files
-- write - Write files
-- exec - Execute commands
-
-## Restricted
-- apply_patch - Requires explicit enable
-
-## Usage Notes
-- Prefer read over exec for file contents
-- Use atomic writes for state files
 ```
 
 ## Channel Notifications

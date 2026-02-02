@@ -2,30 +2,51 @@
 
 ## Overview
 
-The Heartbeat Agent consists of four primary components that work together to create an autonomous execution loop.
+The Heartbeat Agent uses **Claude Code CLI** as its runtime engine. Instead of building custom parsers, executors, and state managers, we leverage Claude Code's native capabilities:
+
+| Capability | Traditional Approach | Claude Code Approach |
+|------------|---------------------|---------------------|
+| Parse heartbeat.md | Custom markdown parser | Claude reads and understands natively |
+| Execute shell commands | Custom executor + subprocess | Claude's Bash tool |
+| Make HTTP requests | Custom HTTP client | Claude runs `curl` via Bash |
+| Update state files | Custom file manager | Claude's Edit/Write tools |
+| Handle errors | Custom retry logic | Claude's reasoning + instructions |
+| Log results | Custom logging system | Claude updates history files |
+
+**Result**: Zero custom code required. Just configuration files.
+
+## Architecture Diagram
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│                        HEARTBEAT AGENT                         │
+│                      HEARTBEAT SYSTEM                          │
 ├────────────────────────────────────────────────────────────────┤
 │                                                                │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐     │
-│  │   Scheduler  │───▶│    Parser    │───▶│   Executor   │     │
-│  │              │    │              │    │              │     │
-│  │ - cron       │    │ - read md    │    │ - run action │     │
-│  │ - systemd    │    │ - validate   │    │ - handle err │     │
-│  │ - openclaw   │    │ - prioritize │    │ - log result │     │
-│  └──────────────┘    └──────────────┘    └──────────────┘     │
-│          │                   │                   │             │
-│          │                   ▼                   │             │
-│          │           ┌──────────────┐            │             │
-│          │           │    State     │            │             │
-│          └──────────▶│   Manager    │◀───────────┘             │
-│                      │              │                          │
-│                      │ - heartbeat  │                          │
-│                      │ - history    │                          │
-│                      │ - config     │                          │
-│                      └──────────────┘                          │
+│  ┌──────────────┐                                              │
+│  │   Scheduler  │  (cron, systemd, or launchd)                │
+│  │              │                                              │
+│  │  */5 * * *   │──────────────┐                              │
+│  └──────────────┘              │                              │
+│                                ▼                              │
+│                    ┌───────────────────┐                      │
+│                    │   Claude Code     │                      │
+│                    │       CLI         │                      │
+│                    │                   │                      │
+│                    │  claude --prompt  │                      │
+│                    │  "Read heartbeat  │                      │
+│                    │   and execute"    │                      │
+│                    └─────────┬─────────┘                      │
+│                              │                                │
+│            ┌─────────────────┼─────────────────┐              │
+│            │                 │                 │              │
+│            ▼                 ▼                 ▼              │
+│    ┌───────────┐     ┌───────────┐     ┌───────────┐         │
+│    │  Read     │     │  Bash     │     │  Edit     │         │
+│    │  Tool     │     │  Tool     │     │  Tool     │         │
+│    │           │     │           │     │           │         │
+│    │ soul.md   │     │ commands  │     │ update    │         │
+│    │heartbeat  │     │ curl/http │     │ status    │         │
+│    └───────────┘     └───────────┘     └───────────┘         │
 │                                                                │
 └────────────────────────────────────────────────────────────────┘
 ```
@@ -34,124 +55,196 @@ The Heartbeat Agent consists of four primary components that work together to cr
 
 ### 1. Scheduler
 
-Responsible for triggering the agent at appropriate intervals.
+Triggers Claude Code at regular intervals. Choose one:
 
-**Options:**
-- **System cron** - Simple, reliable, widely available
-- **Systemd timer** - Better logging, dependency management
-- **OpenClaw cron** - Native integration, session management
-
+**Option A: Cron (Recommended)**
 ```bash
-# Example: System cron (every 5 minutes)
-*/5 * * * * /path/to/heartbeat-agent wake
+# Edit crontab: crontab -e
+*/5 * * * * cd /path/to/workspace && claude --print "Read heartbeat.md and execute pending actions" >> /var/log/heartbeat.log 2>&1
+```
 
-# Example: Systemd timer
+**Option B: Systemd Timer**
+```ini
+# /etc/systemd/system/heartbeat.timer
+[Unit]
+Description=Heartbeat Agent Timer
+
 [Timer]
 OnCalendar=*:0/5
 Persistent=true
+
+[Install]
+WantedBy=timers.target
 ```
 
-See [[05-openclaw-integration#Cron Integration]] for OpenClaw-specific scheduling.
+```ini
+# /etc/systemd/system/heartbeat.service
+[Unit]
+Description=Heartbeat Agent
 
-### 2. Parser
-
-Reads and interprets the [[02-heartbeat-mechanism|heartbeat.md]] file.
-
-**Responsibilities:**
-- Parse markdown frontmatter (YAML)
-- Extract action blocks
-- Validate action syntax
-- Sort by priority
-- Filter by schedule/conditions
-
-**Output:** Ordered list of executable actions
-
-### 3. Executor
-
-Runs actions and handles results.
-
-**Responsibilities:**
-- Execute actions in order
-- Capture output/errors
-- Handle timeouts
-- Manage retries
-- Log results
-
-**Error Handling:**
-```
-Action fails → Check retry policy → Retry OR mark failed → Continue
+[Service]
+Type=oneshot
+WorkingDirectory=/path/to/workspace
+ExecStart=/usr/local/bin/claude --print "Read heartbeat.md and execute pending actions"
 ```
 
-See [[03-action-system#Execution Lifecycle]] for details.
+**Option C: macOS launchd**
+```xml
+<!-- ~/Library/LaunchAgents/com.heartbeat.agent.plist -->
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.heartbeat.agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/claude</string>
+        <string>--print</string>
+        <string>Read heartbeat.md and execute pending actions</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/path/to/workspace</string>
+    <key>StartInterval</key>
+    <integer>300</integer>
+</dict>
+</plist>
+```
 
-### 4. State Manager
+### 2. Claude Code CLI
 
-Maintains all persistent state.
+The agent runtime. Claude Code provides:
 
-**Files Managed:**
+- **Read tool** - Read any file (heartbeat.md, soul.md, configs)
+- **Bash tool** - Execute shell commands, run curl, interact with APIs
+- **Edit/Write tools** - Update heartbeat.md, write logs
+- **Reasoning** - Understand action priorities, handle errors intelligently
+
+### 3. Bootstrap Files
+
+These files tell Claude Code how to behave:
 
 | File | Purpose |
 |------|---------|
-| `heartbeat.md` | Current actions and status |
-| `history/` | Completed action logs |
-| `config.yaml` | Agent configuration |
-| `AGENTS.md` | Bootstrap context (OpenClaw) |
+| `soul.md` | Agent persona, behavior rules, constraints |
+| `heartbeat.md` | Current actions and execution state |
+| `CLAUDE.md` | Claude Code-specific instructions (optional) |
+
+## Claude Code Invocation
+
+### Basic Invocation
+
+```bash
+# One-shot execution (for cron)
+claude --print "Read heartbeat.md and execute all pending actions. Update status when done."
+
+# With system prompt file
+claude --system-prompt soul.md --print "Process heartbeat"
+
+# Headless/non-interactive mode
+claude --print --no-spinner "Execute heartbeat actions"
+```
+
+### Using CLAUDE.md
+
+Create a `CLAUDE.md` file in your workspace root. Claude Code automatically reads this on startup:
+
+```markdown
+# CLAUDE.md
+
+You are a Heartbeat Agent. On each invocation:
+
+1. Read `soul.md` for your persona and rules
+2. Read `heartbeat.md` for pending actions
+3. Execute each PENDING action in priority order (CRITICAL > HIGH > MEDIUM > LOW)
+4. Update the action's status in heartbeat.md after execution
+5. Log results to `history/YYYY-MM-DD.md`
+
+## Execution Rules
+
+- For shell actions: Use the Bash tool
+- For HTTP actions: Use `curl` via Bash
+- For file actions: Use Read/Edit/Write tools
+- Always update status to COMPLETED or FAILED
+- Continue with remaining actions if one fails (unless CRITICAL)
+```
+
+### Recommended Invocation
+
+```bash
+# The simplest approach - CLAUDE.md handles everything
+cd /path/to/workspace && claude --print "Wake up and process heartbeat"
+```
 
 ## Directory Structure
 
 ```
 workspace/
-├── heartbeat.md           # Primary action file
-├── config.yaml            # Agent configuration
-├── AGENTS.md              # Agent instructions (OpenClaw)
-├── SOUL.md                # Persona definition (OpenClaw)
+├── CLAUDE.md              # Claude Code instructions (auto-loaded)
+├── soul.md                # Agent persona and rules
+├── heartbeat.md           # Current actions and state
 ├── history/
 │   ├── 2024-01-15.md      # Daily execution logs
 │   └── 2024-01-16.md
-├── actions/
-│   ├── pending/           # Queued action files
-│   └── templates/         # Action templates
-└── logs/
-    └── agent.log          # Runtime logs
+└── config/                # Optional configuration
+    └── secrets.env        # Environment variables (never commit!)
 ```
 
 ## Data Flow
 
 ```mermaid
 sequenceDiagram
-    participant S as Scheduler
-    participant P as Parser
-    participant E as Executor
-    participant M as State Manager
+    participant S as Scheduler (cron)
+    participant C as Claude Code
+    participant F as Filesystem
 
-    S->>M: Trigger wake
-    M->>P: Read heartbeat.md
-    P->>P: Parse & validate
-    P->>E: Action list
+    S->>C: Invoke claude --print
+    C->>F: Read CLAUDE.md (auto)
+    C->>F: Read soul.md
+    C->>F: Read heartbeat.md
+    C->>C: Identify pending actions
     loop Each Action
-        E->>E: Execute
-        E->>M: Update status
+        C->>C: Execute (Bash/Edit/etc)
+        C->>F: Update heartbeat.md
     end
-    M->>M: Update heartbeat.md
-    M->>M: Write history
+    C->>F: Write history log
+    C-->>S: Exit
 ```
 
-## Integration Points
+## Why Claude Code?
 
-### Input Sources
-- Manual edits to heartbeat.md
-- External systems writing to `actions/pending/`
-- OpenClaw channel messages
-- Webhook triggers
+### Advantages
 
-### Output Destinations
-- File system changes
-- External API calls
-- OpenClaw channel replies
-- Notification systems
+1. **Zero Code** - No parser, executor, or state manager to build
+2. **Intelligent Execution** - Claude understands context, handles edge cases
+3. **Native File Operations** - Read/Edit/Write tools work out of the box
+4. **Shell Integration** - Full Bash access for any command
+5. **Error Handling** - Claude can reason about and recover from errors
+6. **Human-Readable Logs** - Natural language execution summaries
+
+### Considerations
+
+1. **API Costs** - Each invocation uses Claude API tokens
+2. **Latency** - ~5-30 seconds per invocation depending on complexity
+3. **Network Required** - Needs internet for API calls
+4. **Rate Limits** - Consider API rate limits for frequent schedules
+
+### Cost Optimization
+
+- Use `--model haiku` for simple, routine tasks
+- Batch multiple actions per invocation
+- Use longer intervals (15m instead of 5m) when possible
+- Keep heartbeat.md concise
+
+## Security Considerations
+
+1. **Workspace Isolation** - Run in dedicated directory
+2. **No Secrets in Files** - Use environment variables
+3. **Command Restrictions** - Document allowed/blocked commands in soul.md
+4. **API Key Protection** - Never commit `.env` or API keys
 
 ## Next Steps
 
 - [[02-heartbeat-mechanism]] - Define the heartbeat.md format
-- [[03-action-system]] - Design the action system
-- [[05-openclaw-integration]] - Plan OpenClaw integration
+- [[03-action-system]] - Action types Claude Code can execute
+- [[06-configuration]] - Configuration options
