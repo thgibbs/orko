@@ -2,351 +2,426 @@
 
 ## Overview
 
-The implementation is divided into four phases, each building on the previous. Each phase delivers working functionality.
+With Claude Code as the runtime, implementation is primarily **configuration**, not coding. The phases focus on setting up files and scheduler.
 
 ```
 Phase 1        Phase 2        Phase 3        Phase 4
 ┌──────┐      ┌──────┐      ┌──────┐      ┌──────┐
-│ Core │ ───▶ │Basic │ ───▶ │OpenCl│ ───▶ │Advanc│
-│Heart │      │Action│      │aw    │      │ed    │
-│beat  │      │Exec  │      │Integ │      │      │
+│Create│ ───▶ │Setup │ ───▶ │Test &│ ───▶ │Advanc│
+│Files │      │Sched │      │Refine│      │ed    │
 └──────┘      └──────┘      └──────┘      └──────┘
    │             │             │             │
    ▼             ▼             ▼             ▼
- Parse        Execute       Channel      AI Actions
- Update       Shell/HTTP    Notify       Workflows
- Schedule     Retry         Sessions     Dashboard
+ soul.md       cron        validate      webhooks
+ heartbeat   systemd       tune         workflows
+ CLAUDE.md   launchd      optimize      multi-agent
 ```
+
+**Total estimated effort**: A few hours of configuration, not weeks of coding.
 
 ---
 
-## Phase 1: Core Heartbeat Mechanism
+## Phase 1: Create Bootstrap Files
 
-**Goal:** Basic heartbeat file parsing and state management.
+**Goal:** Create the files Claude Code needs to operate.
 
 ### Deliverables
 
-1. **Heartbeat Parser**
-   - Parse markdown frontmatter
-   - Extract action blocks
-   - Validate syntax
-   - Handle malformed input gracefully
+1. **CLAUDE.md** - Instructions for Claude Code
+2. **soul.md** - Agent persona and behavior rules
+3. **heartbeat.md** - Initial action file
+4. **Directory structure** - history/, config/
 
-2. **State Manager**
-   - Read/write heartbeat.md
-   - File locking
-   - Atomic updates
-   - Backup before modification
+### Tasks
 
-3. **Scheduler Integration**
-   - Cron job setup
-   - Systemd timer option
-   - Manual trigger command
+- [ ] Create workspace directory
+- [ ] Write CLAUDE.md with agent instructions
+- [ ] Write soul.md with persona definition
+- [ ] Create initial heartbeat.md with test action
+- [ ] Create history/ directory
+- [ ] Test manually: `claude --print "Process heartbeat"`
 
-4. **CLI Interface**
-   ```bash
-   heartbeat init          # Create initial heartbeat.md
-   heartbeat wake          # Trigger agent wake cycle
-   heartbeat status        # Show current state
-   heartbeat validate      # Validate heartbeat.md syntax
-   ```
+### CLAUDE.md Template
 
-### Technical Tasks
+```markdown
+# Heartbeat Agent Instructions
 
-- [ ] Define TypeScript/Python types for heartbeat schema
-- [ ] Implement markdown parser with YAML frontmatter support
-- [ ] Build action block extractor
-- [ ] Create file manager with locking
-- [ ] Write atomic update function
-- [ ] Build CLI framework
-- [ ] Add logging infrastructure
-- [ ] Write unit tests for parser
-- [ ] Create example heartbeat.md files
+You are an autonomous Heartbeat Agent. Each time you are invoked:
+
+## Startup Sequence
+
+1. Read `soul.md` to understand your persona and rules
+2. Read `heartbeat.md` to see pending actions
+3. Check current date/time for scheduled actions
+
+## Execution Loop
+
+For each action with status: PENDING (in priority order: CRITICAL > HIGH > MEDIUM > LOW):
+
+1. Check if schedule condition is met (if specified)
+2. Check if dependencies are satisfied (if specified)
+3. Execute the action:
+   - **shell**: Use Bash tool to run the command
+   - **http**: Use `curl` via Bash tool
+   - **file**: Use Read/Edit/Write tools
+   - **notify**: Use appropriate notification method
+4. Update the action's status in heartbeat.md:
+   - On success: status: COMPLETED, add completed_at timestamp
+   - On failure: status: FAILED, add error message
+5. Continue to next action (unless CRITICAL action failed)
+
+## After Execution
+
+1. Append execution summary to `history/YYYY-MM-DD.md`
+2. Report any FAILED actions prominently
+3. Exit cleanly
+
+## Rules
+
+- Never skip CRITICAL priority actions
+- Always update heartbeat.md after each action
+- Log all executions with timestamps
+- If an action is unclear, mark it SKIPPED with a note
+```
+
+### soul.md Template
+
+```markdown
+# Soul - Heartbeat Agent
+
+## Identity
+
+You are a reliable, efficient task executor. You prioritize:
+- Reliability over speed
+- Clear reporting over brevity
+- Safety over convenience
+
+## Behavior
+
+- Execute actions in priority order
+- Report errors clearly with context
+- Never make assumptions about unclear tasks
+- Ask for clarification by marking actions NEEDS_CLARIFICATION
+
+## Communication Style
+
+- Brief, factual status updates
+- Include timestamps in all logs
+- Use structured output for machine parseability
+
+## Constraints
+
+- Only execute commands listed in heartbeat.md
+- Never modify files outside the workspace without explicit action
+- Never execute destructive commands without confirmation flag
+- Rate limit notifications to avoid spam
+```
+
+### heartbeat.md Template
+
+```markdown
+---
+version: 1
+last_wake: null
+status: idle
+---
+
+# Heartbeat
+
+## Pending Actions
+
+### [LOW] Test Action - Hello World
+- **id**: test-001
+- **type**: shell
+- **command**: echo "Heartbeat agent is alive! $(date)"
+- **status**: PENDING
+
+## Completed Today
+
+(none yet)
+
+## Notes
+
+Initial heartbeat file created.
+```
 
 ### Acceptance Criteria
 
-- [ ] Can parse valid heartbeat.md files
-- [ ] Gracefully handles invalid files with clear errors
-- [ ] Updates don't corrupt file on failure
-- [ ] CLI commands work as documented
-- [ ] 80%+ test coverage on parser
-
-### Files to Create
-
-```
-src/
-├── parser/
-│   ├── heartbeat-parser.ts
-│   ├── action-parser.ts
-│   └── frontmatter.ts
-├── state/
-│   ├── state-manager.ts
-│   └── file-lock.ts
-├── cli/
-│   ├── index.ts
-│   └── commands/
-│       ├── init.ts
-│       ├── wake.ts
-│       ├── status.ts
-│       └── validate.ts
-└── types/
-    └── index.ts
-```
+- [ ] `claude --print "Read heartbeat.md and tell me what actions exist"` works
+- [ ] `claude --print "Execute the test action and update heartbeat.md"` works
+- [ ] heartbeat.md is updated with status: COMPLETED after execution
+- [ ] history/YYYY-MM-DD.md file is created with log entry
 
 ---
 
-## Phase 2: Basic Action Execution
+## Phase 2: Setup Scheduler
 
-**Goal:** Execute shell and HTTP actions with retry support.
+**Goal:** Automate Claude Code invocation on a schedule.
 
 ### Deliverables
 
-1. **Action Executor Framework**
-   - Plugin architecture for action types
-   - Timeout handling
-   - Output capture
-   - Error normalization
+1. **Scheduler configuration** - cron, systemd, or launchd
+2. **Logging setup** - Capture output for debugging
+3. **Environment setup** - API keys, paths
 
-2. **Shell Action Handler**
-   - Command execution
-   - Working directory support
-   - Environment variables
-   - Output capture
+### Tasks
 
-3. **HTTP Action Handler**
-   - Request building
-   - Response validation
-   - Status code checking
-   - Timeout handling
+- [ ] Choose scheduler (cron recommended for simplicity)
+- [ ] Configure environment variables (ANTHROPIC_API_KEY)
+- [ ] Set up cron job
+- [ ] Configure output logging
+- [ ] Test scheduled execution
+- [ ] Monitor first few runs
 
-4. **Retry System**
-   - Configurable retry policies
-   - Backoff strategies
-   - Retry state tracking
+### Cron Setup (Recommended)
 
-5. **Execution History**
-   - Log completed actions
-   - Track execution times
-   - Store error details
-   - Daily log rotation
+```bash
+# 1. Ensure Claude Code is installed and API key is set
+which claude
+echo $ANTHROPIC_API_KEY
 
-### Technical Tasks
+# 2. Create a wrapper script for environment
+cat > ~/heartbeat/run-heartbeat.sh << 'EOF'
+#!/bin/bash
+cd ~/heartbeat
+export ANTHROPIC_API_KEY="your-key-here"
+claude --print "Wake up and process heartbeat" >> logs/heartbeat.log 2>&1
+EOF
+chmod +x ~/heartbeat/run-heartbeat.sh
 
-- [ ] Design executor plugin interface
-- [ ] Implement base executor class
-- [ ] Build shell action handler
-- [ ] Build HTTP action handler
-- [ ] Create retry policy system
-- [ ] Implement backoff calculators
-- [ ] Build history logger
-- [ ] Add execution metrics
-- [ ] Write integration tests
-- [ ] Create action examples
+# 3. Add to crontab
+crontab -e
+# Add: */15 * * * * ~/heartbeat/run-heartbeat.sh
+```
+
+### Systemd Setup (Linux)
+
+```bash
+# Create service file
+sudo cat > /etc/systemd/system/heartbeat.service << 'EOF'
+[Unit]
+Description=Heartbeat Agent
+After=network.target
+
+[Service]
+Type=oneshot
+User=youruser
+WorkingDirectory=/home/youruser/heartbeat
+Environment="ANTHROPIC_API_KEY=your-key-here"
+ExecStart=/usr/local/bin/claude --print "Wake up and process heartbeat"
+StandardOutput=append:/var/log/heartbeat.log
+StandardError=append:/var/log/heartbeat.log
+EOF
+
+# Create timer
+sudo cat > /etc/systemd/system/heartbeat.timer << 'EOF'
+[Unit]
+Description=Run Heartbeat Agent every 15 minutes
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+# Enable and start
+sudo systemctl daemon-reload
+sudo systemctl enable heartbeat.timer
+sudo systemctl start heartbeat.timer
+```
+
+### launchd Setup (macOS)
+
+```bash
+# Create plist
+cat > ~/Library/LaunchAgents/com.heartbeat.agent.plist << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.heartbeat.agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>cd ~/heartbeat && /usr/local/bin/claude --print "Wake up and process heartbeat"</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>ANTHROPIC_API_KEY</key>
+        <string>your-key-here</string>
+    </dict>
+    <key>StartInterval</key>
+    <integer>900</integer>
+    <key>StandardOutPath</key>
+    <string>/Users/youruser/heartbeat/logs/heartbeat.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/youruser/heartbeat/logs/heartbeat.log</string>
+</dict>
+</plist>
+EOF
+
+# Load the agent
+launchctl load ~/Library/LaunchAgents/com.heartbeat.agent.plist
+```
 
 ### Acceptance Criteria
 
-- [ ] Shell commands execute correctly
-- [ ] HTTP requests work with auth headers
-- [ ] Timeouts trigger correctly
-- [ ] Retries follow configured policy
-- [ ] Failed actions logged with details
-- [ ] History files created daily
-
-### Files to Create
-
-```
-src/
-├── executor/
-│   ├── executor.ts
-│   ├── action-handler.ts
-│   └── handlers/
-│       ├── shell.ts
-│       ├── http.ts
-│       └── file.ts
-├── retry/
-│   ├── retry-policy.ts
-│   └── backoff.ts
-└── history/
-    └── history-logger.ts
-```
+- [ ] Scheduler runs automatically at configured interval
+- [ ] Logs are captured and accessible
+- [ ] API key is securely configured
+- [ ] Can verify execution via logs
+- [ ] heartbeat.md is updated by scheduled runs
 
 ---
 
-## Phase 3: OpenClaw Integration
+## Phase 3: Test and Refine
 
-**Goal:** Integrate with OpenClaw for messaging and scheduling.
+**Goal:** Validate the system works reliably and tune for your use case.
 
 ### Deliverables
 
-1. **OpenClaw Cron Integration**
-   - Register as OpenClaw cron job
-   - Use `next-heartbeat` wake mode
-   - Session isolation
+1. **Real actions** - Replace test actions with actual tasks
+2. **Error handling** - Verify failure modes work
+3. **Optimization** - Tune schedule and prompts
 
-2. **Channel Notifications**
-   - Send results to configured channels
-   - Support Slack, Discord, Telegram
-   - Format messages appropriately
+### Tasks
 
-3. **Bootstrap Files**
-   - AGENTS.md integration
-   - SOUL.md for persona
-   - Session context
+- [ ] Add real actions to heartbeat.md
+- [ ] Test failure handling (intentionally fail an action)
+- [ ] Verify retry behavior works
+- [ ] Test priority ordering
+- [ ] Optimize Claude Code prompt for efficiency
+- [ ] Consider using `--model haiku` for simple tasks
 
-4. **Message Queue Integration**
-   - Receive actions via messages
-   - Queue for next heartbeat
-   - Reply with results
+### Testing Checklist
 
-### Technical Tasks
+```markdown
+## Manual Tests
 
-- [ ] Research OpenClaw cron API
-- [ ] Implement cron job registration
-- [ ] Build notification action handler
-- [ ] Create channel formatters
-- [ ] Integrate AGENTS.md reading
-- [ ] Add message queue listener
-- [ ] Build reply formatter
-- [ ] Test with OpenClaw gateway
-- [ ] Document setup process
+- [ ] Add PENDING action → runs on next wake
+- [ ] Add CRITICAL action that fails → stops execution
+- [ ] Add HIGH action that fails → continues to next
+- [ ] Add action with `schedule: hourly` → only runs at correct time
+- [ ] Add action with `depends_on: other-action` → waits for dependency
+
+## Error Scenarios
+
+- [ ] Network failure during HTTP action → marks FAILED
+- [ ] Shell command returns non-zero → marks FAILED
+- [ ] Timeout reached → marks FAILED with timeout message
+- [ ] Malformed heartbeat.md → Claude reports error, doesn't crash
+```
+
+### Optimization Tips
+
+```bash
+# Use Haiku for simple, routine tasks (cheaper, faster)
+claude --model haiku --print "Process heartbeat"
+
+# Use Sonnet for complex actions requiring reasoning
+claude --model sonnet --print "Process heartbeat"
+
+# Reduce prompt size for faster execution
+claude --print "Heartbeat"  # Relies on CLAUDE.md for full instructions
+```
 
 ### Acceptance Criteria
 
-- [ ] Agent wakes via OpenClaw cron
-- [ ] Notifications sent to channels
-- [ ] Messages can add actions
-- [ ] Bootstrap files respected
-- [ ] Works with existing OpenClaw setup
-
-### Files to Create
-
-```
-src/
-├── openclaw/
-│   ├── cron-integration.ts
-│   ├── channel-notifier.ts
-│   ├── message-handler.ts
-│   └── bootstrap.ts
-├── executor/handlers/
-│   └── notify.ts
-└── config/
-    └── openclaw-config.ts
-```
-
-### Configuration
-
-```yaml
-# config.yaml
-openclaw:
-  enabled: true
-  gateway: ws://127.0.0.1:18789
-  cron:
-    schedule: "*/5 * * * *"
-    session: main
-  notify:
-    default_channel: telegram
-    on_failure: slack:#alerts
-```
+- [ ] Real actions execute successfully
+- [ ] Failures are handled gracefully
+- [ ] Logs provide useful debugging info
+- [ ] System runs reliably for 24+ hours
 
 ---
 
 ## Phase 4: Advanced Features
 
-**Goal:** AI-powered actions, workflows, and monitoring.
+**Goal:** Add optional advanced capabilities.
 
-### Deliverables
+### Optional Deliverables
 
-1. **Agent Action Handler**
-   - Delegate tasks to AI
-   - Context file injection
-   - Tool restrictions
-   - Output parsing
+1. **Webhooks** - Trigger actions via HTTP
+2. **Notifications** - Slack/Discord/Telegram alerts
+3. **Multi-agent** - Multiple heartbeat files
+4. **OpenClaw integration** - Message-driven actions
 
-2. **Composite Actions**
-   - Action grouping
-   - Sequential/parallel execution
-   - Failure handling modes
+### Webhook Trigger (Optional)
 
-3. **Workflow Engine**
-   - Multi-step workflows
-   - Branching logic
-   - State persistence
+Simple webhook using a tiny server or serverless function:
 
-4. **Web Dashboard**
-   - View current state
-   - Execution history
-   - Manual triggers
-   - Configuration editor
-
-5. **Advanced Scheduling**
-   - File change triggers
-   - Webhook triggers
-   - Event-driven actions
-
-### Technical Tasks
-
-- [ ] Build agent action handler
-- [ ] Implement composite executor
-- [ ] Design workflow schema
-- [ ] Build workflow engine
-- [ ] Create dashboard backend
-- [ ] Build dashboard frontend
-- [ ] Add file watcher
-- [ ] Implement webhook receiver
-- [ ] Add metrics endpoint
-- [ ] Write e2e tests
-
-### Acceptance Criteria
-
-- [ ] AI actions complete tasks correctly
-- [ ] Composites handle failures properly
-- [ ] Workflows persist state
-- [ ] Dashboard shows real-time status
-- [ ] Webhooks trigger actions
-
-### Files to Create
-
+```bash
+# Using netcat (simplest possible)
+while true; do
+  echo -e "HTTP/1.1 200 OK\n\nTriggered" | nc -l 8080
+  claude --print "Webhook triggered - process heartbeat"
+done
 ```
-src/
-├── executor/handlers/
-│   ├── agent.ts
-│   └── composite.ts
-├── workflow/
-│   ├── workflow-engine.ts
-│   ├── workflow-parser.ts
-│   └── workflow-state.ts
-├── triggers/
-│   ├── file-watcher.ts
-│   └── webhook.ts
-└── dashboard/
-    ├── server.ts
-    └── api/
-        ├── status.ts
-        ├── history.ts
-        └── trigger.ts
+
+Or use a cloud function (AWS Lambda, Cloudflare Workers, etc.)
+
+### Notification Actions
+
+Add to heartbeat.md:
+
+```markdown
+### [HIGH] Notify on daily summary
+- **id**: notify-001
+- **type**: shell
+- **command**: |
+    curl -X POST "https://hooks.slack.com/services/XXX" \
+      -H "Content-Type: application/json" \
+      -d '{"text": "Daily heartbeat summary: All tasks completed"}'
+- **schedule**: daily:09:00
+- **status**: PENDING
+```
+
+### OpenClaw Integration
+
+See [[05-openclaw-integration]] for full details. Summary:
+
+```json
+// ~/.openclaw/openclaw.json
+{
+  "cron": {
+    "jobs": [{
+      "id": "heartbeat-wake",
+      "schedule": "*/15 * * * *",
+      "prompt": "Process heartbeat",
+      "session": "heartbeat"
+    }]
+  }
+}
 ```
 
 ---
 
 ## Timeline Summary
 
-| Phase | Focus | Key Deliverable |
-|-------|-------|-----------------|
-| 1 | Core | Heartbeat parser + CLI |
-| 2 | Actions | Shell + HTTP execution |
-| 3 | Integration | OpenClaw channels |
-| 4 | Advanced | AI actions + dashboard |
+| Phase | Focus | Effort |
+|-------|-------|--------|
+| 1 | Create bootstrap files | ~1 hour |
+| 2 | Setup scheduler | ~30 minutes |
+| 3 | Test and refine | ~2-4 hours |
+| 4 | Advanced features | As needed |
 
-## Dependencies
+**Total: A few hours**, not weeks of development.
 
-```mermaid
-graph TD
-    P1[Phase 1: Core] --> P2[Phase 2: Actions]
-    P2 --> P3[Phase 3: OpenClaw]
-    P2 --> P4[Phase 4: Advanced]
-    P3 --> P4
-```
+## Comparison: Traditional vs Claude Code Approach
+
+| Aspect | Traditional (custom code) | Claude Code Approach |
+|--------|---------------------------|---------------------|
+| Development time | Weeks | Hours |
+| Lines of code | 1000+ | 0 |
+| Parser implementation | Required | Claude understands markdown |
+| Executor implementation | Required | Claude's Bash tool |
+| State management | Required | Claude's Edit tool |
+| Error handling | Required | Claude's reasoning |
+| Maintenance burden | High | Low (just update prompts) |
 
 ## Next Steps
 
-Start with [[#Phase 1 Core Heartbeat Mechanism|Phase 1]] tasks.
+Start with [[#Phase 1 Create Bootstrap Files|Phase 1]] - create your bootstrap files.

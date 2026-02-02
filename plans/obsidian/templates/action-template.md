@@ -4,6 +4,14 @@
 
 These templates provide reusable patterns for common action types. Copy and customize as needed.
 
+**Note**: All actions are executed by Claude Code using its native tools:
+- Shell actions → Claude's Bash tool
+- HTTP actions → Claude runs `curl` via Bash
+- File actions → Claude's Read/Edit/Write tools
+- Notifications → Claude runs `curl` to webhooks
+
+No custom code needed - just define the actions in your `heartbeat.md`.
+
 ---
 
 ## Shell Actions
@@ -162,9 +170,15 @@ These templates provide reusable patterns for common action types. Copy and cust
 
 ---
 
-## Agent Actions
+## Agent Actions (Advanced)
 
-### Summarize Logs
+These actions represent tasks Claude Code handles directly during heartbeat processing. The `agent` type is essentially a marker that tells Claude this requires more complex reasoning.
+
+**Note**: Since Claude Code IS the agent, these actions are processed inline - Claude reads the prompt and executes it using its available tools. For truly separate/isolated agent invocations, use a shell action to spawn a new `claude` process.
+
+### Summarize Logs (Inline)
+
+Claude Code processes this directly using its reasoning and file tools:
 
 ```markdown
 ### [MEDIUM] Summarize daily logs
@@ -181,11 +195,21 @@ These templates provide reusable patterns for common action types. Copy and cust
   4. Recommendations
 
   Write summary to /reports/daily/$(date +%Y-%m-%d).md
-- **model**: claude-3-sonnet
-- **max_tokens**: 4096
-- **context_files**:
-  - /var/log/app/$(date +%Y-%m-%d).log
-- **status**: pending
+- **status**: PENDING
+```
+
+### Spawn Separate Claude (Shell)
+
+For truly isolated agent invocations:
+
+```markdown
+### [MEDIUM] Analyze logs (separate process)
+- **id**: analyze-logs-separate
+- **type**: shell
+- **command**: |
+  claude --print "Read /var/log/app/$(date +%Y-%m-%d).log and summarize errors" \
+    > /reports/daily/$(date +%Y-%m-%d).md
+- **status**: PENDING
 ```
 
 ### Analyze and Fix

@@ -2,365 +2,335 @@
 
 ## Overview
 
-The heartbeat agent uses a layered configuration system:
+With Claude Code as the runtime, configuration is simplified to:
 
-1. **Default values** - Built-in sensible defaults
-2. **Config file** - `config.yaml` in workspace
-3. **Environment variables** - Override specific values
-4. **Command-line flags** - Runtime overrides
+1. **CLAUDE.md** - Instructions for Claude Code (what to do)
+2. **soul.md** - Agent persona (how to behave)
+3. **heartbeat.md** - Actions to execute (what tasks)
+4. **Scheduler** - When to run (cron/systemd/launchd)
+5. **Environment** - API keys and secrets
 
-## Configuration File
+No complex config.yaml needed - the markdown files ARE the configuration.
+
+## CLAUDE.md - Agent Instructions
+
+This file is automatically read by Claude Code when invoked in the workspace.
 
 ### Location
 
 ```
-~/.heartbeat/config.yaml           # Default location
-./config.yaml                      # Working directory
-HEARTBEAT_CONFIG=/path/to/config   # Environment override
---config /path/to/config           # CLI override
+workspace/
+├── CLAUDE.md    # Claude Code reads this automatically
 ```
 
-### Full Schema
+### Full Template
 
-```yaml
-# config.yaml
+```markdown
+# Heartbeat Agent Instructions
 
-# Agent identity
-agent:
-  name: heartbeat-agent
-  version: "1.0"
+You are an autonomous Heartbeat Agent. Each time you are invoked:
 
-# Heartbeat file settings
-heartbeat:
-  path: ./heartbeat.md
-  backup:
-    enabled: true
-    max_backups: 10
-    path: ./history/backups/
-  lock:
-    timeout: 30s
-    stale_threshold: 5m
+## Startup Sequence
 
-# Scheduling
-schedule:
-  default_interval: 5m
-  timezone: UTC
-  daily_reset: "04:00"
+1. Read `soul.md` to understand your persona and rules
+2. Read `heartbeat.md` to see pending actions
+3. Note the current date/time for schedule evaluation
 
-# Execution settings
-execution:
-  max_concurrent: 1
-  default_timeout: 5m
-  max_timeout: 1h
+## Execution Loop
 
-# Retry policies
-retry:
-  default_max_attempts: 3
-  default_backoff: exponential
-  backoff_base: 1s
-  backoff_max: 60s
+For each action with status: PENDING (process in priority order: CRITICAL > HIGH > MEDIUM > LOW):
 
-# Logging
-logging:
-  level: info
-  format: json
-  file: ./logs/agent.log
-  max_size: 10MB
-  max_files: 5
+1. **Check schedule** - If `schedule:` is specified, verify it's due:
+   - `every:5m` - Check if 5+ minutes since last completion
+   - `daily:02:00` - Check if current time matches
+   - `hourly` - Check if 60+ minutes since last completion
+   - No schedule = always due
 
-# History
-history:
-  enabled: true
-  path: ./history/
-  retention_days: 30
+2. **Check dependencies** - If `depends_on:` is specified, verify that action is COMPLETED
 
-# Action handlers
-actions:
-  shell:
-    default_shell: /bin/sh
-    allowed_commands: []  # Empty = all allowed
-    blocked_commands:
-      - rm -rf /
-      - sudo
-    working_dir: ./
+3. **Check conditions** - If `condition:` is specified, evaluate it
 
-  http:
-    timeout: 30s
-    max_redirects: 5
-    user_agent: "heartbeat-agent/1.0"
+4. **Execute the action**:
+   - `type: shell` → Use Bash tool to run `command`
+   - `type: http` → Use curl via Bash tool
+   - `type: file` → Use Read/Edit/Write tools
+   - `type: notify` → Use curl to POST to webhook
 
-  agent:
-    model: claude-3-sonnet
-    max_tokens: 4096
-    temperature: 0
+5. **Update heartbeat.md**:
+   - On success: Set `status: COMPLETED`, add `completed_at: <timestamp>`
+   - On failure: Set `status: FAILED`, add `error: <message>`
+   - If retries remain: Keep `status: PENDING`, increment `retry_count`
 
-  notify:
-    default_channel: slack
-    rate_limit: 10/minute
+6. **Continue to next action** (unless a CRITICAL action failed)
 
-# Notification channels
-notify:
-  slack:
-    webhook: ${SLACK_WEBHOOK}
-    username: Heartbeat Agent
-    icon_emoji: ":heartbeat:"
+## After All Actions
 
-  discord:
-    webhook: ${DISCORD_WEBHOOK}
+1. Update frontmatter in heartbeat.md:
+   - Set `last_wake: <current timestamp>`
+   - Set `status: idle`
 
-  telegram:
-    bot_token: ${TELEGRAM_BOT_TOKEN}
-    chat_id: ${TELEGRAM_CHAT_ID}
+2. Append summary to `history/YYYY-MM-DD.md`:
+   ```
+   ## HH:MM:SS
+   - action-id: COMPLETED (duration)
+   - action-id: FAILED (error message)
+   ```
 
-  email:
-    smtp_host: smtp.example.com
-    smtp_port: 587
-    username: ${SMTP_USER}
-    password: ${SMTP_PASS}
-    from: heartbeat@example.com
-    to: alerts@example.com
+3. If any actions FAILED, report them prominently in your output
 
-# OpenClaw integration
-openclaw:
-  enabled: false
-  gateway: ws://127.0.0.1:18789
-  cron:
-    enabled: true
-    job_id: heartbeat-wake
-    schedule: "*/5 * * * *"
-    isolated: true
-  session:
-    id: heartbeat
-    reset_daily: false
-  bootstrap:
-    agents_md: ./AGENTS.md
-    soul_md: ./SOUL.md
+## Rules
 
-# Security
-security:
-  sandbox_mode: false
-  allowed_paths:
-    - ./
-    - /tmp/heartbeat/
-  blocked_paths:
-    - /etc/
-    - /var/
-  env_whitelist:
-    - PATH
-    - HOME
-    - USER
+- CRITICAL actions block further execution on failure
+- HIGH/MEDIUM/LOW actions continue on failure
+- Always update heartbeat.md after each action
+- Never execute the same action twice in one invocation
+- If an action is unclear, mark it `status: NEEDS_CLARIFICATION`
+
+## Safety
+
+- Never run destructive commands without explicit confirmation in the action
+- Never modify files outside the workspace unless explicitly specified
+- Never expose secrets in logs or output
+```
+
+## soul.md - Agent Persona
+
+Defines personality and behavioral constraints.
+
+### Full Template
+
+```markdown
+# Soul - Heartbeat Agent
+
+## Identity
+
+I am a reliable, autonomous task executor. My core values:
+
+- **Reliability** over speed
+- **Clarity** over brevity
+- **Safety** over convenience
+- **Transparency** over silence
+
+## Behavior
+
+### When executing actions:
+- Follow instructions exactly as written
+- Report errors with full context
+- Never assume unclear instructions
+- Mark ambiguous actions for human review
+
+### When something fails:
+- Capture the full error message
+- Note the exact command that failed
+- Continue with remaining actions (unless CRITICAL)
+- Prominently report all failures
+
+### When uncertain:
+- Do not guess or improvise
+- Mark the action as NEEDS_CLARIFICATION
+- Explain what information is missing
+- Continue with other actions
+
+## Communication Style
+
+- Brief, factual updates
+- Structured output (lists, timestamps)
+- No unnecessary elaboration
+- Include actionable information
+
+## Constraints
+
+- Only execute actions defined in heartbeat.md
+- Never modify heartbeat.md structure (only update statuses)
+- Never access files outside workspace without explicit path in action
+- Rate limit notifications (max 1 per channel per invocation)
+- Never expose environment variables in output
+
+## Emergency Stops
+
+If I encounter any of these, stop immediately and report:
+- `rm -rf /` or similar destructive commands
+- Actions accessing `/etc/passwd`, `/etc/shadow`, or system files
+- Actions that would expose credentials
+- Infinite loops or runaway processes
 ```
 
 ## Environment Variables
 
-All config values can be overridden via environment variables:
+Set these before invoking Claude Code:
 
 ```bash
-# Format: HEARTBEAT_<SECTION>_<KEY>
-HEARTBEAT_AGENT_NAME=my-agent
-HEARTBEAT_SCHEDULE_DEFAULT_INTERVAL=10m
-HEARTBEAT_LOGGING_LEVEL=debug
-HEARTBEAT_OPENCLAW_ENABLED=true
+# Required
+export ANTHROPIC_API_KEY="sk-ant-..."
 
-# Secrets (use these, never put in config files)
-SLACK_WEBHOOK=https://hooks.slack.com/...
-DISCORD_WEBHOOK=https://discord.com/api/webhooks/...
-TELEGRAM_BOT_TOKEN=123456:ABC...
+# Optional - for notifications
+export SLACK_WEBHOOK="https://hooks.slack.com/services/..."
+export DISCORD_WEBHOOK="https://discord.com/api/webhooks/..."
+export TELEGRAM_BOT_TOKEN="123456:ABC..."
+export TELEGRAM_CHAT_ID="-100123456789"
+
+# Optional - for actions that need credentials
+export API_TOKEN="..."
+export DATABASE_URL="..."
 ```
 
-## CLI Flags
+### Secure Setup
+
+**Never commit secrets to git!**
 
 ```bash
-heartbeat wake \
-  --config ./config.yaml \
-  --heartbeat ./heartbeat.md \
-  --log-level debug \
-  --dry-run \
-  --timeout 10m
+# Create a secrets file
+cat > ~/heartbeat/.env << 'EOF'
+export ANTHROPIC_API_KEY="sk-ant-..."
+export SLACK_WEBHOOK="https://hooks.slack.com/services/..."
+EOF
+chmod 600 ~/heartbeat/.env
+
+# Source before running
+source ~/heartbeat/.env && claude --print "Process heartbeat"
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--config` | Config file path |
-| `--heartbeat` | Heartbeat file path |
-| `--log-level` | Log verbosity |
-| `--dry-run` | Parse and validate only |
-| `--timeout` | Max execution time |
-| `--no-notify` | Disable notifications |
-| `--force` | Ignore schedule, run all |
+## Scheduler Configuration
 
-## Configuration Validation
+### Cron (Recommended)
 
 ```bash
-# Validate configuration
-heartbeat config validate
+# Edit crontab
+crontab -e
 
-# Show effective config (with env overrides)
-heartbeat config show
+# Run every 15 minutes
+*/15 * * * * cd ~/heartbeat && source .env && claude --print "Process heartbeat" >> logs/cron.log 2>&1
 
-# Check specific section
-heartbeat config show --section openclaw
+# Run every hour at :00
+0 * * * * cd ~/heartbeat && source .env && claude --print "Process heartbeat" >> logs/cron.log 2>&1
+
+# Run daily at 9am
+0 9 * * * cd ~/heartbeat && source .env && claude --print "Process heartbeat" >> logs/cron.log 2>&1
 ```
 
-## Profiles
+### Systemd (Linux)
 
-Support multiple configurations for different environments:
+See [[04-implementation-phases#Systemd Setup Linux]] for full setup.
 
-```yaml
-# config.yaml
-profiles:
-  development:
-    logging:
-      level: debug
-    execution:
-      max_concurrent: 1
-    notify:
-      default_channel: null  # Disable
+### launchd (macOS)
 
-  production:
-    logging:
-      level: info
-    execution:
-      max_concurrent: 5
-    security:
-      sandbox_mode: true
-```
+See [[04-implementation-phases#launchd Setup macOS]] for full setup.
+
+## Claude Code CLI Options
 
 ```bash
-# Use specific profile
-heartbeat wake --profile production
+# Basic invocation
+claude --print "Process heartbeat"
 
-# Or via environment
-HEARTBEAT_PROFILE=production heartbeat wake
+# Use a specific model (cheaper for simple tasks)
+claude --model haiku --print "Process heartbeat"
+
+# Verbose output
+claude --print --verbose "Process heartbeat"
+
+# With timeout
+claude --print --timeout 300000 "Process heartbeat"  # 5 min timeout
+
+# Non-interactive mode (for scripting)
+claude --print "Process heartbeat"
 ```
 
-## Secrets Management
+### Model Selection
 
-### Environment Variables (Recommended)
+| Model | Use Case | Cost |
+|-------|----------|------|
+| `haiku` | Simple, routine tasks | Cheapest |
+| `sonnet` | Default, balanced | Medium |
+| `opus` | Complex reasoning | Most expensive |
 
 ```bash
-# .env file (never commit!)
-SLACK_WEBHOOK=https://hooks.slack.com/services/xxx
-TELEGRAM_BOT_TOKEN=123456:ABC-xyz
+# Use Haiku for routine checks
+claude --model haiku --print "Process heartbeat"
 
-# Load in shell
-source .env && heartbeat wake
+# Use Sonnet for tasks requiring more reasoning
+claude --model sonnet --print "Process heartbeat"
 ```
 
-### Secret References
+## Directory Structure
 
-```yaml
-notify:
-  slack:
-    webhook: ${SLACK_WEBHOOK}  # Environment variable
-    webhook: file:///secrets/slack-webhook  # File reference
-    webhook: cmd://pass show slack/webhook  # Command output
+```
+~/heartbeat/
+├── CLAUDE.md              # Agent instructions
+├── soul.md                # Agent persona
+├── heartbeat.md           # Current actions
+├── .env                   # Secrets (chmod 600, gitignore)
+├── .gitignore             # Ignore .env, logs/
+├── history/
+│   ├── 2024-01-15.md      # Daily logs
+│   └── 2024-01-16.md
+├── logs/
+│   └── cron.log           # Scheduler output
+└── scripts/               # Optional helper scripts
+    └── backup.sh
 ```
 
-### Encrypted Config
+### .gitignore
 
-```bash
-# Encrypt sensitive values
-heartbeat config encrypt --key $ENCRYPTION_KEY
-
-# Decrypt at runtime
-HEARTBEAT_ENCRYPTION_KEY=xxx heartbeat wake
-```
-
-## Default Values Reference
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `heartbeat.path` | `./heartbeat.md` | Heartbeat file location |
-| `schedule.default_interval` | `5m` | Default action interval |
-| `execution.max_concurrent` | `1` | Parallel action limit |
-| `execution.default_timeout` | `5m` | Action timeout |
-| `retry.default_max_attempts` | `3` | Retry count |
-| `logging.level` | `info` | Log verbosity |
-| `history.retention_days` | `30` | History cleanup |
-
-## OpenClaw-Specific Configuration
-
-When using OpenClaw integration, additional config goes in `~/.openclaw/openclaw.json`:
-
-```json
-{
-  "agents": {
-    "heartbeat": {
-      "workspace": "~/.heartbeat",
-      "model": "claude-3-sonnet",
-      "tools": {
-        "exec": {
-          "applyPatch": false
-        }
-      },
-      "session": {
-        "resetDaily": false,
-        "idleMinutes": 0
-      }
-    }
-  },
-  "cron": {
-    "jobs": [
-      {
-        "id": "heartbeat-wake",
-        "schedule": "*/5 * * * *",
-        "prompt": "Wake and process heartbeat.md",
-        "session": "heartbeat",
-        "isolated": true
-      }
-    ]
-  }
-}
-```
-
-## Migration Guide
-
-### From v0.x to v1.x
-
-```yaml
-# Old format (v0.x)
-interval: 5m
-timeout: 30s
-
-# New format (v1.x)
-schedule:
-  default_interval: 5m
-execution:
-  default_timeout: 30s
-```
-
-Run migration:
-```bash
-heartbeat config migrate --from 0 --to 1
+```gitignore
+.env
+*.log
+logs/
+history/
 ```
 
 ## Troubleshooting
 
-### Config Not Loading
+### Claude Code not finding CLAUDE.md
 
+Ensure you're in the correct directory:
 ```bash
-# Check effective config path
-heartbeat config path
-
-# Validate syntax
-heartbeat config validate --verbose
-
-# Show resolution order
-heartbeat config debug
+cd ~/heartbeat
+pwd  # Should show your workspace
+claude --print "Process heartbeat"
 ```
 
-### Environment Variables Not Applied
+### API key not set
 
 ```bash
-# List recognized env vars
-heartbeat config env
+# Check if set
+echo $ANTHROPIC_API_KEY
 
-# Test specific override
-HEARTBEAT_LOGGING_LEVEL=debug heartbeat config show
+# Set it
+export ANTHROPIC_API_KEY="sk-ant-..."
 ```
+
+### Cron not running
+
+```bash
+# Check cron logs
+grep CRON /var/log/syslog  # Linux
+log show --predicate 'process == "cron"' --last 1h  # macOS
+
+# Verify crontab
+crontab -l
+
+# Test manually
+cd ~/heartbeat && source .env && claude --print "Process heartbeat"
+```
+
+### Actions not executing
+
+1. Check heartbeat.md has actions with `status: PENDING`
+2. Verify schedules are due (check `last_wake` timestamp)
+3. Run manually and check output for errors
+
+## Migration from Custom Code
+
+If you had a custom heartbeat implementation, migration is simple:
+
+1. Keep your `heartbeat.md` format (likely compatible)
+2. Create `CLAUDE.md` with execution instructions
+3. Create `soul.md` with behavioral rules
+4. Remove custom parser/executor code
+5. Set up scheduler to invoke Claude Code
 
 ## Next Steps
 
-- [[04-implementation-phases]] - Start implementation
-- [[05-openclaw-integration]] - OpenClaw setup
+- [[04-implementation-phases]] - Step-by-step setup
+- [[02-heartbeat-mechanism]] - heartbeat.md format
+- [[05-openclaw-integration]] - Optional OpenClaw setup
