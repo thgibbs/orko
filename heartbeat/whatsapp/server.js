@@ -110,7 +110,7 @@ function generateActionId() {
 /**
  * Add an action to heartbeat.md
  */
-function addActionToHeartbeat(taskDescription, messageId) {
+function addActionToHeartbeat(taskDescription, messageId, senderNumber) {
   try {
     let content = fs.readFileSync(HEARTBEAT_PATH, 'utf8');
 
@@ -124,6 +124,7 @@ function addActionToHeartbeat(taskDescription, messageId) {
 - **type**: whatsapp-reply
 - **task**: ${taskDescription}
 - **reply_to**: ${messageId}
+- **from**: ${senderNumber}
 - **received_at**: ${timestamp}
 - **status**: PENDING
 `;
@@ -279,7 +280,7 @@ app.post('/webhook', async (req, res) => {
   // For tasks, add to heartbeat.md
   if (command === 'task' && args) {
     try {
-      const actionId = addActionToHeartbeat(args, MessageSid);
+      const actionId = addActionToHeartbeat(args, MessageSid, From);
       await sendWhatsAppMessage(From, `Got it! Task added as ${actionId}. I'll work on it soon!`);
     } catch (error) {
       await sendWhatsAppMessage(From, `Oops! Had trouble adding that task: ${error.message}`);
@@ -325,6 +326,8 @@ function watchResponses() {
           const to = response.to || MY_WHATSAPP_NUMBER;
           if (to) {
             await sendWhatsAppMessage(to, response.message);
+          } else {
+            log(`WARNING: Cannot send response for action ${response.action_id} - no recipient. Response must include 'to' field or MY_WHATSAPP_NUMBER must be set in .env`);
           }
         }
 
