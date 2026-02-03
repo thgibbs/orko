@@ -27,7 +27,7 @@ For each action with status: PENDING (process in priority order: CRITICAL > HIGH
    - `type: http` → Use curl via Bash tool
    - `type: file` → Use Read/Edit/Write tools
    - `type: notify` → Use curl to POST to webhook
-   - `type: whatsapp-reply` → Process the task and write response to `whatsapp/responses.json`
+   - `type: telegram-reply` → Process the task and write response to `whatsapp/responses.json`
 
 5. **Update heartbeat.md**:
    - On success: Set `status: COMPLETED`, add `completed_at: <timestamp>`
@@ -114,9 +114,9 @@ Create the file if it doesn't exist. Append each action as it completes. This pr
 - Never modify files outside the workspace unless explicitly specified
 - Never expose secrets in logs or output
 
-## WhatsApp Reply Actions
+## Telegram Reply Actions
 
-When you encounter an action with `type: whatsapp-reply`:
+When you encounter an action with `type: telegram-reply`:
 
 1. **Read the task** from the `task:` field
 2. **Process the task** - This may involve:
@@ -130,8 +130,8 @@ When you encounter an action with `type: whatsapp-reply`:
    {
      "pending": [
        {
-         "to": "the-from-field-from-the-action",
-         "message": "Your response text here (max 1600 chars)",
+         "chat_id": "the-chat_id-field-from-the-action",
+         "message": "Your response text here (max 4096 chars)",
          "action_id": "the-action-id",
          "timestamp": "ISO timestamp"
        }
@@ -139,25 +139,25 @@ When you encounter an action with `type: whatsapp-reply`:
    }
    ```
 
-   **IMPORTANT**: The `to` field is required! Copy the value from the action's `from:` field.
+   **IMPORTANT**: The `chat_id` field is required! Copy the value from the action's `chat_id:` field.
 
 4. **Update the action status** in heartbeat.md to COMPLETED
 
 **Response Guidelines:**
-- Keep responses under 1600 characters (WhatsApp limit)
+- Keep responses under 4096 characters (Telegram limit)
 - Use a friendly, Orko-like tone
 - Include relevant details but be concise
 - For errors, explain what went wrong clearly
 - Redact any PII before writing to responses.json
 
-**Example WhatsApp action:**
+**Example Telegram action:**
 ```markdown
-### [MEDIUM] WhatsApp Task - Check disk space
-- **id**: wa-abc123
-- **type**: whatsapp-reply
+### [MEDIUM] Telegram Task - Check disk space
+- **id**: tg-abc123
+- **type**: telegram-reply
 - **task**: Check disk space on the server
-- **reply_to**: SM1234567890
-- **from**: whatsapp:+15551234567
+- **reply_to**: 12345
+- **chat_id**: 987654321
 - **received_at**: 2024-01-15T10:30:00Z
 - **status**: PENDING
 ```
@@ -167,9 +167,9 @@ When you encounter an action with `type: whatsapp-reply`:
 {
   "pending": [
     {
-      "to": "whatsapp:+15551234567",
+      "chat_id": "987654321",
       "message": "Disk space check complete!\n\nFilesystem: /dev/disk1s1\nUsed: 45%\nFree: 234GB\n\nLooking good! Plenty of space available.",
-      "action_id": "wa-abc123",
+      "action_id": "tg-abc123",
       "timestamp": "2024-01-15T10:30:15Z"
     }
   ]

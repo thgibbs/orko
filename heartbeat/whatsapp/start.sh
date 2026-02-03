@@ -1,5 +1,5 @@
 #!/bin/bash
-# Start Orko WhatsApp webhook server with ngrok tunnel
+# Start Orko Telegram bot
 
 set -e
 
@@ -13,26 +13,20 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 log() {
-  echo -e "${GREEN}[Orko WhatsApp]${NC} $1"
+  echo -e "${GREEN}[Orko Telegram]${NC} $1"
 }
 
 warn() {
-  echo -e "${YELLOW}[Orko WhatsApp]${NC} $1"
+  echo -e "${YELLOW}[Orko Telegram]${NC} $1"
 }
 
 error() {
-  echo -e "${RED}[Orko WhatsApp]${NC} $1"
+  echo -e "${RED}[Orko Telegram]${NC} $1"
 }
 
 # Check for required tools
 if ! command -v node &> /dev/null; then
   error "Node.js is required but not installed"
-  exit 1
-fi
-
-if ! command -v ngrok &> /dev/null; then
-  error "ngrok is required but not installed"
-  echo "Install with: brew install ngrok"
   exit 1
 fi
 
@@ -51,46 +45,17 @@ if [ ! -d "node_modules" ]; then
 fi
 
 # Create PID file directory
-mkdir -p /tmp/orko-whatsapp
+mkdir -p /tmp/orko-telegram
 
-# Get port from .env or use default
-PORT=${WEBHOOK_PORT:-3000}
-
-# Start ngrok in background
-log "Starting ngrok tunnel on port $PORT..."
-ngrok http $PORT --log=stdout > /tmp/orko-whatsapp/ngrok.log 2>&1 &
-NGROK_PID=$!
-echo $NGROK_PID > /tmp/orko-whatsapp/ngrok.pid
-
-# Wait for ngrok to start
-sleep 2
-
-# Get ngrok URL
-NGROK_URL=$(curl -s http://localhost:4040/api/tunnels 2>/dev/null | grep -o '"public_url":"https://[^"]*' | cut -d'"' -f4 | head -1)
-
-if [ -z "$NGROK_URL" ]; then
-  error "Failed to get ngrok URL. Check if ngrok started correctly."
-  error "Ngrok log: $(cat /tmp/orko-whatsapp/ngrok.log)"
-  kill $NGROK_PID 2>/dev/null || true
-  exit 1
-fi
-
-log "ngrok tunnel active: $NGROK_URL"
-log ""
-log "Configure Twilio webhook URL to:"
-echo -e "${YELLOW}  $NGROK_URL/webhook${NC}"
-log ""
-
-# Start the webhook server
-log "Starting webhook server..."
+# Start the bot
+log "Starting Telegram bot..."
 node server.js &
 SERVER_PID=$!
-echo $SERVER_PID > /tmp/orko-whatsapp/server.pid
+echo $SERVER_PID > /tmp/orko-telegram/server.pid
 
-log "Server started with PID $SERVER_PID"
+log "Bot started with PID $SERVER_PID"
 log ""
 log "To stop: ./stop.sh"
-log "To view ngrok dashboard: http://localhost:4040"
 log ""
 
 # Wait for server to start
@@ -98,10 +63,9 @@ sleep 1
 
 # Check if server is running
 if kill -0 $SERVER_PID 2>/dev/null; then
-  log "Orko WhatsApp integration is running!"
+  log "Orko Telegram integration is running!"
 else
-  error "Server failed to start"
-  kill $NGROK_PID 2>/dev/null || true
+  error "Bot failed to start"
   exit 1
 fi
 
