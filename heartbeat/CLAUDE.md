@@ -27,6 +27,7 @@ For each action with status: PENDING (process in priority order: CRITICAL > HIGH
    - `type: http` → Use curl via Bash tool
    - `type: file` → Use Read/Edit/Write tools
    - `type: notify` → Use curl to POST to webhook
+   - `type: whatsapp-reply` → Process the task and write response to `whatsapp/responses.json`
 
 5. **Update heartbeat.md**:
    - On success: Set `status: COMPLETED`, add `completed_at: <timestamp>`
@@ -112,3 +113,60 @@ Create the file if it doesn't exist. Append each action as it completes. This pr
 - Never run destructive commands without explicit confirmation in the action
 - Never modify files outside the workspace unless explicitly specified
 - Never expose secrets in logs or output
+
+## WhatsApp Reply Actions
+
+When you encounter an action with `type: whatsapp-reply`:
+
+1. **Read the task** from the `task:` field
+2. **Process the task** - This may involve:
+   - Answering a question
+   - Running a shell command and reporting results
+   - Checking status of something
+   - Any other task Orko can perform
+
+3. **Write the response** to `whatsapp/responses.json`:
+   ```json
+   {
+     "pending": [
+       {
+         "message": "Your response text here (max 1600 chars)",
+         "action_id": "the-action-id",
+         "timestamp": "ISO timestamp"
+       }
+     ]
+   }
+   ```
+
+4. **Update the action status** in heartbeat.md to COMPLETED
+
+**Response Guidelines:**
+- Keep responses under 1600 characters (WhatsApp limit)
+- Use a friendly, Orko-like tone
+- Include relevant details but be concise
+- For errors, explain what went wrong clearly
+- Redact any PII before writing to responses.json
+
+**Example WhatsApp action:**
+```markdown
+### [MEDIUM] WhatsApp Task - Check disk space
+- **id**: wa-abc123
+- **type**: whatsapp-reply
+- **task**: Check disk space on the server
+- **reply_to**: SM1234567890
+- **received_at**: 2024-01-15T10:30:00Z
+- **status**: PENDING
+```
+
+**Example response:**
+```json
+{
+  "pending": [
+    {
+      "message": "Disk space check complete!\n\nFilesystem: /dev/disk1s1\nUsed: 45%\nFree: 234GB\n\nLooking good! Plenty of space available.",
+      "action_id": "wa-abc123",
+      "timestamp": "2024-01-15T10:30:15Z"
+    }
+  ]
+}
+```
