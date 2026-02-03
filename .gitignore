@@ -9,8 +9,14 @@ firebase-debug.log
 # OS files
 .DS_Store
 
+# Node.js
+node_modules/
+
 # Heartbeat runtime files (generated during execution)
 heartbeat/logs/*.log
 heartbeat/history/*.md
 !heartbeat/history/.gitkeep
 !heartbeat/logs/.gitkeep
+
+# Temporary files
+/tmp/orko-whatsapp/
