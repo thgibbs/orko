@@ -30,6 +30,11 @@ const TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER;
 const MY_WHATSAPP_NUMBER = process.env.MY_WHATSAPP_NUMBER;
 const VALIDATE_SIGNATURE = process.env.VALIDATE_TWILIO_SIGNATURE !== 'false';
 
+// Debug: Print Twilio credentials for verification
+console.log('[DEBUG] TWILIO_ACCOUNT_SID:', TWILIO_ACCOUNT_SID);
+console.log('[DEBUG] TWILIO_AUTH_TOKEN:', TWILIO_AUTH_TOKEN);
+console.log('[DEBUG] TWILIO_WHATSAPP_NUMBER:', TWILIO_WHATSAPP_NUMBER);
+
 // File paths
 const HEARTBEAT_PATH = path.join(__dirname, '..', 'heartbeat.md');
 const RESPONSES_PATH = path.join(__dirname, 'responses.json');
