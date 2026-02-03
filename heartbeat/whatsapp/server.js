@@ -82,14 +82,19 @@ function redactPII(text) {
 
 /**
  * Log with timestamp and PII redaction
+ * @param {string} message - The message to log
+ * @param {object|null} data - Optional data to log as JSON
+ * @param {object} options - Options for logging
+ * @param {boolean} options.redact - Whether to redact PII (default: true)
  */
-function log(message, data = null) {
+function log(message, data = null, options = {}) {
+  const { redact = true } = options;
   const timestamp = new Date().toISOString();
-  const redactedMessage = redactPII(message);
-  console.log(`[${timestamp}] ${redactedMessage}`);
+  const outputMessage = redact ? redactPII(message) : message;
+  console.log(`[${timestamp}] ${outputMessage}`);
   if (data) {
     console.log(JSON.stringify(data, (key, value) => {
-      if (typeof value === 'string') return redactPII(value);
+      if (typeof value === 'string' && redact) return redactPII(value);
       return value;
     }, 2));
   }
@@ -234,8 +239,8 @@ async function sendWhatsAppMessage(to, body) {
   }
 
   log(`[sendWhatsAppMessage] Preparing to send message`);
-  log(`[sendWhatsAppMessage] From: ${TWILIO_WHATSAPP_NUMBER}`);
-  log(`[sendWhatsAppMessage] To: ${redactPII(to)}`);
+  log(`[sendWhatsAppMessage] From: ${TWILIO_WHATSAPP_NUMBER}`, null, { redact: false });
+  log(`[sendWhatsAppMessage] To: ${to}`, null, { redact: false });
   log(`[sendWhatsAppMessage] Body length: ${body?.length || 0} chars`);
 
   try {
