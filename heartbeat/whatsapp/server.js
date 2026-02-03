@@ -14,6 +14,11 @@ const path = require('path');
 const chokidar = require('chokidar');
 
 const app = express();
+
+// Trust proxy headers (needed for ngrok/reverse proxy to correctly identify HTTPS)
+// This makes req.protocol use X-Forwarded-Proto header
+app.set('trust proxy', 1);
+
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
