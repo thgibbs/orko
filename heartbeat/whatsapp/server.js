@@ -37,7 +37,14 @@ const RESPONSES_PATH = path.join(__dirname, 'responses.json');
 // Twilio client for sending messages
 let twilioClient = null;
 if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
+  // Warn if credentials look like placeholders
+  if (TWILIO_ACCOUNT_SID.includes('xxxx') || TWILIO_AUTH_TOKEN.includes('xxxx')) {
+    console.warn('[WARNING] Twilio credentials appear to be placeholder values from .env.example');
+    console.warn('[WARNING] Update TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN in heartbeat/.env with real credentials');
+  }
   twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+} else {
+  console.warn('[WARNING] Twilio credentials not configured. Create heartbeat/.env from .env.example');
 }
 
 /**
@@ -210,7 +217,11 @@ async function sendWhatsAppMessage(to, body) {
     log(`Sent message ${message.sid}`);
     return true;
   } catch (error) {
-    log(`Error sending message: ${error.message}`);
+    if (error.code === 20003 || error.message === 'Authenticate') {
+      log('Error sending message: Twilio authentication failed. Check TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN in .env file');
+    } else {
+      log(`Error sending message: ${error.message}`);
+    }
     return false;
   }
 }
