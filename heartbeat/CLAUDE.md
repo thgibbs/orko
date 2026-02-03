@@ -130,6 +130,7 @@ When you encounter an action with `type: whatsapp-reply`:
    {
      "pending": [
        {
+         "to": "the-from-field-from-the-action",
          "message": "Your response text here (max 1600 chars)",
          "action_id": "the-action-id",
          "timestamp": "ISO timestamp"
@@ -137,6 +138,8 @@ When you encounter an action with `type: whatsapp-reply`:
      ]
    }
    ```
+
+   **IMPORTANT**: The `to` field is required! Copy the value from the action's `from:` field.
 
 4. **Update the action status** in heartbeat.md to COMPLETED
 
@@ -154,6 +157,7 @@ When you encounter an action with `type: whatsapp-reply`:
 - **type**: whatsapp-reply
 - **task**: Check disk space on the server
 - **reply_to**: SM1234567890
+- **from**: whatsapp:+15551234567
 - **received_at**: 2024-01-15T10:30:00Z
 - **status**: PENDING
 ```
@@ -163,6 +167,7 @@ When you encounter an action with `type: whatsapp-reply`:
 {
   "pending": [
     {
+      "to": "whatsapp:+15551234567",
       "message": "Disk space check complete!\n\nFilesystem: /dev/disk1s1\nUsed: 45%\nFree: 234GB\n\nLooking good! Plenty of space available.",
       "action_id": "wa-abc123",
       "timestamp": "2024-01-15T10:30:15Z"
