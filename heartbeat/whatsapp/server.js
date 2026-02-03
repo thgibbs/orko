@@ -30,10 +30,11 @@ const TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER;
 const MY_WHATSAPP_NUMBER = process.env.MY_WHATSAPP_NUMBER;
 const VALIDATE_SIGNATURE = process.env.VALIDATE_TWILIO_SIGNATURE !== 'false';
 
-// Debug: Print Twilio credentials for verification
-console.log('[DEBUG] TWILIO_ACCOUNT_SID:', TWILIO_ACCOUNT_SID);
-console.log('[DEBUG] TWILIO_AUTH_TOKEN:', TWILIO_AUTH_TOKEN);
-console.log('[DEBUG] TWILIO_WHATSAPP_NUMBER:', TWILIO_WHATSAPP_NUMBER);
+// Debug: Print Twilio credentials for verification (redacted for security)
+console.log('[DEBUG] TWILIO_ACCOUNT_SID:', TWILIO_ACCOUNT_SID ? `${TWILIO_ACCOUNT_SID.substring(0, 8)}...${TWILIO_ACCOUNT_SID.substring(TWILIO_ACCOUNT_SID.length - 4)}` : 'NOT SET');
+console.log('[DEBUG] TWILIO_AUTH_TOKEN:', TWILIO_AUTH_TOKEN ? `${TWILIO_AUTH_TOKEN.substring(0, 4)}...${TWILIO_AUTH_TOKEN.substring(TWILIO_AUTH_TOKEN.length - 4)} (length: ${TWILIO_AUTH_TOKEN.length})` : 'NOT SET');
+console.log('[DEBUG] TWILIO_WHATSAPP_NUMBER:', TWILIO_WHATSAPP_NUMBER || 'NOT SET');
+console.log('[DEBUG] .env file loaded from:', require('path').join(__dirname, '..', '.env'));
 
 // File paths
 const HEARTBEAT_PATH = path.join(__dirname, '..', 'heartbeat.md');
@@ -41,15 +42,30 @@ const RESPONSES_PATH = path.join(__dirname, 'responses.json');
 
 // Twilio client for sending messages
 let twilioClient = null;
+console.log('[DEBUG] Initializing Twilio client...');
 if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
   // Warn if credentials look like placeholders
   if (TWILIO_ACCOUNT_SID.includes('xxxx') || TWILIO_AUTH_TOKEN.includes('xxxx')) {
     console.warn('[WARNING] Twilio credentials appear to be placeholder values from .env.example');
     console.warn('[WARNING] Update TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN in heartbeat/.env with real credentials');
   }
-  twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+
+  // Validate credential format
+  if (!TWILIO_ACCOUNT_SID.startsWith('AC')) {
+    console.warn('[WARNING] TWILIO_ACCOUNT_SID should start with "AC". Current value starts with:', TWILIO_ACCOUNT_SID.substring(0, 2));
+  }
+
+  console.log('[DEBUG] Creating Twilio client with SID:', TWILIO_ACCOUNT_SID.substring(0, 8) + '...');
+  try {
+    twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
+    console.log('[DEBUG] Twilio client created successfully');
+  } catch (error) {
+    console.error('[ERROR] Failed to create Twilio client:', error.message);
+  }
 } else {
   console.warn('[WARNING] Twilio credentials not configured. Create heartbeat/.env from .env.example');
+  console.warn('[DEBUG] TWILIO_ACCOUNT_SID is:', TWILIO_ACCOUNT_SID ? 'set' : 'NOT SET');
+  console.warn('[DEBUG] TWILIO_AUTH_TOKEN is:', TWILIO_AUTH_TOKEN ? 'set' : 'NOT SET');
 }
 
 /**
@@ -209,24 +225,43 @@ Status: ${status ? status[1] : 'Unknown'}`;
  * Send WhatsApp message via Twilio
  */
 async function sendWhatsAppMessage(to, body) {
+  log('[sendWhatsAppMessage] Called');
+  log(`[sendWhatsAppMessage] twilioClient exists: ${!!twilioClient}`);
+
   if (!twilioClient) {
-    log('Twilio client not configured, cannot send message');
+    log('[sendWhatsAppMessage] Twilio client not configured, cannot send message');
     return false;
   }
 
+  log(`[sendWhatsAppMessage] Preparing to send message`);
+  log(`[sendWhatsAppMessage] From: ${TWILIO_WHATSAPP_NUMBER}`);
+  log(`[sendWhatsAppMessage] To: ${redactPII(to)}`);
+  log(`[sendWhatsAppMessage] Body length: ${body?.length || 0} chars`);
+
   try {
+    log('[sendWhatsAppMessage] Calling twilioClient.messages.create()...');
     const message = await twilioClient.messages.create({
       from: TWILIO_WHATSAPP_NUMBER,
       to: to,
       body: body
     });
-    log(`Sent message ${message.sid}`);
+    log(`[sendWhatsAppMessage] Success! Message SID: ${message.sid}`);
+    log(`[sendWhatsAppMessage] Message status: ${message.status}`);
     return true;
   } catch (error) {
+    log(`[sendWhatsAppMessage] Error caught!`);
+    log(`[sendWhatsAppMessage] Error name: ${error.name}`);
+    log(`[sendWhatsAppMessage] Error code: ${error.code}`);
+    log(`[sendWhatsAppMessage] Error status: ${error.status}`);
+    log(`[sendWhatsAppMessage] Error message: ${error.message}`);
+    log(`[sendWhatsAppMessage] Error details: ${JSON.stringify(error.details || {})}`);
+    log(`[sendWhatsAppMessage] Error moreInfo: ${error.moreInfo || 'N/A'}`);
+
     if (error.code === 20003 || error.message === 'Authenticate') {
-      log('Error sending message: Twilio authentication failed. Check TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN in .env file');
-    } else {
-      log(`Error sending message: ${error.message}`);
+      log('[sendWhatsAppMessage] Authentication failure detected (code 20003 or Authenticate message)');
+      log('[sendWhatsAppMessage] This usually means TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN is incorrect');
+      log(`[sendWhatsAppMessage] Current SID starts with: ${TWILIO_ACCOUNT_SID?.substring(0, 8) || 'NOT SET'}`);
+      log(`[sendWhatsAppMessage] Current Token length: ${TWILIO_AUTH_TOKEN?.length || 0}`);
     }
     return false;
   }
