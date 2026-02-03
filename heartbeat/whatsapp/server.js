@@ -1,71 +1,54 @@
 /**
- * Orko WhatsApp Webhook Server
+ * Orko Telegram Bot
  *
- * Receives WhatsApp messages via Twilio, adds actions to heartbeat.md,
+ * Receives Telegram messages, adds actions to heartbeat.md,
  * and sends responses back when Orko processes them.
  */
 
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 
-const express = require('express');
-const twilio = require('twilio');
+const TelegramBot = require('node-telegram-bot-api');
 const fs = require('fs');
 const path = require('path');
 const chokidar = require('chokidar');
 
-const app = express();
-
-// Trust proxy headers (needed for ngrok/reverse proxy to correctly identify HTTPS)
-// This makes req.protocol use X-Forwarded-Proto header
-app.set('trust proxy', 1);
-
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
-
 // Configuration
-const PORT = process.env.WEBHOOK_PORT || 3000;
-const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
-const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
-const TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER;
-const MY_WHATSAPP_NUMBER = process.env.MY_WHATSAPP_NUMBER;
-const VALIDATE_SIGNATURE = process.env.VALIDATE_TWILIO_SIGNATURE !== 'false';
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const MY_TELEGRAM_CHAT_ID = process.env.MY_TELEGRAM_CHAT_ID;
 
-// Debug: Print Twilio credentials for verification (redacted for security)
-console.log('[DEBUG] TWILIO_ACCOUNT_SID:', TWILIO_ACCOUNT_SID ? `${TWILIO_ACCOUNT_SID.substring(0, 8)}...${TWILIO_ACCOUNT_SID.substring(TWILIO_ACCOUNT_SID.length - 4)}` : 'NOT SET');
-console.log('[DEBUG] TWILIO_AUTH_TOKEN:', TWILIO_AUTH_TOKEN ? `${TWILIO_AUTH_TOKEN.substring(0, 4)}...${TWILIO_AUTH_TOKEN.substring(TWILIO_AUTH_TOKEN.length - 4)} (length: ${TWILIO_AUTH_TOKEN.length})` : 'NOT SET');
-console.log('[DEBUG] TWILIO_WHATSAPP_NUMBER:', TWILIO_WHATSAPP_NUMBER || 'NOT SET');
+// Debug: Print Telegram credentials for verification (redacted for security)
+console.log('[DEBUG] TELEGRAM_BOT_TOKEN:', TELEGRAM_BOT_TOKEN ? `${TELEGRAM_BOT_TOKEN.substring(0, 10)}...${TELEGRAM_BOT_TOKEN.substring(TELEGRAM_BOT_TOKEN.length - 4)}` : 'NOT SET');
+console.log('[DEBUG] MY_TELEGRAM_CHAT_ID:', MY_TELEGRAM_CHAT_ID || 'NOT SET');
 console.log('[DEBUG] .env file loaded from:', require('path').join(__dirname, '..', '.env'));
 
 // File paths
 const HEARTBEAT_PATH = path.join(__dirname, '..', 'heartbeat.md');
 const RESPONSES_PATH = path.join(__dirname, 'responses.json');
 
-// Twilio client for sending messages
-let twilioClient = null;
-console.log('[DEBUG] Initializing Twilio client...');
-if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
-  // Warn if credentials look like placeholders
-  if (TWILIO_ACCOUNT_SID.includes('xxxx') || TWILIO_AUTH_TOKEN.includes('xxxx')) {
-    console.warn('[WARNING] Twilio credentials appear to be placeholder values from .env.example');
-    console.warn('[WARNING] Update TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN in heartbeat/.env with real credentials');
+// Telegram bot instance
+let bot = null;
+console.log('[DEBUG] Initializing Telegram bot...');
+
+if (TELEGRAM_BOT_TOKEN) {
+  // Warn if token looks like placeholder
+  if (TELEGRAM_BOT_TOKEN.includes('1234567890') || TELEGRAM_BOT_TOKEN === '1234567890:ABCdefGHIjklMNOpqrsTUVwxyz') {
+    console.warn('[WARNING] Telegram token appears to be a placeholder value from .env.example');
+    console.warn('[WARNING] Update TELEGRAM_BOT_TOKEN in heartbeat/.env with your real bot token');
   }
 
-  // Validate credential format
-  if (!TWILIO_ACCOUNT_SID.startsWith('AC')) {
-    console.warn('[WARNING] TWILIO_ACCOUNT_SID should start with "AC". Current value starts with:', TWILIO_ACCOUNT_SID.substring(0, 2));
+  // Validate token format (should contain a colon)
+  if (!TELEGRAM_BOT_TOKEN.includes(':')) {
+    console.warn('[WARNING] TELEGRAM_BOT_TOKEN format looks invalid (should contain ":")');
   }
 
-  console.log('[DEBUG] Creating Twilio client with SID:', TWILIO_ACCOUNT_SID.substring(0, 8) + '...');
   try {
-    twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
-    console.log('[DEBUG] Twilio client created successfully');
+    bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: true });
+    console.log('[DEBUG] Telegram bot created successfully with polling enabled');
   } catch (error) {
-    console.error('[ERROR] Failed to create Twilio client:', error.message);
+    console.error('[ERROR] Failed to create Telegram bot:', error.message);
   }
 } else {
-  console.warn('[WARNING] Twilio credentials not configured. Create heartbeat/.env from .env.example');
-  console.warn('[DEBUG] TWILIO_ACCOUNT_SID is:', TWILIO_ACCOUNT_SID ? 'set' : 'NOT SET');
-  console.warn('[DEBUG] TWILIO_AUTH_TOKEN is:', TWILIO_AUTH_TOKEN ? 'set' : 'NOT SET');
+  console.warn('[WARNING] Telegram credentials not configured. Create heartbeat/.env from .env.example');
 }
 
 /**
@@ -82,10 +65,6 @@ function redactPII(text) {
 
 /**
  * Log with timestamp and PII redaction
- * @param {string} message - The message to log
- * @param {object|null} data - Optional data to log as JSON
- * @param {object} options - Options for logging
- * @param {boolean} options.redact - Whether to redact PII (default: true)
  */
 function log(message, data = null, options = {}) {
   const { redact = true } = options;
@@ -101,10 +80,10 @@ function log(message, data = null, options = {}) {
 }
 
 /**
- * Parse WhatsApp command from message body
+ * Parse Telegram command from message text
  */
-function parseCommand(body) {
-  const trimmed = body.trim();
+function parseCommand(text) {
+  const trimmed = text.trim();
 
   // Command patterns
   if (trimmed.startsWith('/task ')) {
@@ -116,7 +95,7 @@ function parseCommand(body) {
   if (trimmed === '/list') {
     return { command: 'list', args: null };
   }
-  if (trimmed === '/help') {
+  if (trimmed === '/help' || trimmed === '/start') {
     return { command: 'help', args: null };
   }
 
@@ -130,13 +109,13 @@ function parseCommand(body) {
 function generateActionId() {
   const timestamp = Date.now().toString(36);
   const random = Math.random().toString(36).substring(2, 6);
-  return `wa-${timestamp}-${random}`;
+  return `tg-${timestamp}-${random}`;
 }
 
 /**
  * Add an action to heartbeat.md
  */
-function addActionToHeartbeat(taskDescription, messageId, senderNumber) {
+function addActionToHeartbeat(taskDescription, messageId, chatId) {
   try {
     let content = fs.readFileSync(HEARTBEAT_PATH, 'utf8');
 
@@ -145,12 +124,12 @@ function addActionToHeartbeat(taskDescription, messageId, senderNumber) {
 
     // Create new action block
     const newAction = `
-### [MEDIUM] WhatsApp Task - ${taskDescription.substring(0, 50)}${taskDescription.length > 50 ? '...' : ''}
+### [MEDIUM] Telegram Task - ${taskDescription.substring(0, 50)}${taskDescription.length > 50 ? '...' : ''}
 - **id**: ${actionId}
-- **type**: whatsapp-reply
+- **type**: telegram-reply
 - **task**: ${taskDescription}
 - **reply_to**: ${messageId}
-- **from**: ${senderNumber}
+- **chat_id**: ${chatId}
 - **received_at**: ${timestamp}
 - **status**: PENDING
 `;
@@ -180,7 +159,7 @@ function addActionToHeartbeat(taskDescription, messageId, senderNumber) {
 function getImmediateResponse(command) {
   switch (command) {
     case 'help':
-      return `*Orko WhatsApp Commands*
+      return `*Orko Telegram Commands*
 
 /task <description> - Add a new task for Orko
 /status - Check Orko's current status
@@ -227,128 +206,104 @@ Status: ${status ? status[1] : 'Unknown'}`;
 }
 
 /**
- * Send WhatsApp message via Twilio
+ * Send Telegram message
  */
-async function sendWhatsAppMessage(to, body) {
-  log('[sendWhatsAppMessage] Called');
-  log(`[sendWhatsAppMessage] twilioClient exists: ${!!twilioClient}`);
+async function sendTelegramMessage(chatId, text) {
+  log('[sendTelegramMessage] Called');
+  log(`[sendTelegramMessage] bot exists: ${!!bot}`);
 
-  if (!twilioClient) {
-    log('[sendWhatsAppMessage] Twilio client not configured, cannot send message');
+  if (!bot) {
+    log('[sendTelegramMessage] Telegram bot not configured, cannot send message');
     return false;
   }
 
-  log(`[sendWhatsAppMessage] Preparing to send message`);
-  log(`[sendWhatsAppMessage] From: ${TWILIO_WHATSAPP_NUMBER}`, null, { redact: false });
-  log(`[sendWhatsAppMessage] To: ${to}`, null, { redact: false });
-  log(`[sendWhatsAppMessage] Body length: ${body?.length || 0} chars`);
+  log(`[sendTelegramMessage] Preparing to send message`);
+  log(`[sendTelegramMessage] Chat ID: ${chatId}`);
+  log(`[sendTelegramMessage] Text length: ${text?.length || 0} chars`);
 
   try {
-    log('[sendWhatsAppMessage] Calling twilioClient.messages.create()...');
-    const message = await twilioClient.messages.create({
-      from: TWILIO_WHATSAPP_NUMBER,
-      to: to,
-      body: body
-    });
-    log(`[sendWhatsAppMessage] Success! Message SID: ${message.sid}`);
-    log(`[sendWhatsAppMessage] Message status: ${message.status}`);
+    log('[sendTelegramMessage] Calling bot.sendMessage()...');
+    const message = await bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+    log(`[sendTelegramMessage] Success! Message ID: ${message.message_id}`);
     return true;
   } catch (error) {
-    log(`[sendWhatsAppMessage] Error caught!`);
-    log(`[sendWhatsAppMessage] Error name: ${error.name}`);
-    log(`[sendWhatsAppMessage] Error code: ${error.code}`);
-    log(`[sendWhatsAppMessage] Error status: ${error.status}`);
-    log(`[sendWhatsAppMessage] Error message: ${error.message}`);
-    log(`[sendWhatsAppMessage] Error details: ${JSON.stringify(error.details || {})}`);
-    log(`[sendWhatsAppMessage] Error moreInfo: ${error.moreInfo || 'N/A'}`);
+    log(`[sendTelegramMessage] Error caught!`);
+    log(`[sendTelegramMessage] Error name: ${error.name}`);
+    log(`[sendTelegramMessage] Error code: ${error.code}`);
+    log(`[sendTelegramMessage] Error message: ${error.message}`);
 
-    if (error.code === 20003 || error.message === 'Authenticate') {
-      log('[sendWhatsAppMessage] Authentication failure detected (code 20003 or Authenticate message)');
-      log('[sendWhatsAppMessage] This usually means TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN is incorrect');
-      log(`[sendWhatsAppMessage] Current SID starts with: ${TWILIO_ACCOUNT_SID?.substring(0, 8) || 'NOT SET'}`);
-      log(`[sendWhatsAppMessage] Current Token length: ${TWILIO_AUTH_TOKEN?.length || 0}`);
+    // Retry without markdown if parsing failed
+    if (error.message && error.message.includes("can't parse")) {
+      try {
+        log('[sendTelegramMessage] Retrying without Markdown...');
+        const message = await bot.sendMessage(chatId, text);
+        log(`[sendTelegramMessage] Success on retry! Message ID: ${message.message_id}`);
+        return true;
+      } catch (retryError) {
+        log(`[sendTelegramMessage] Retry also failed: ${retryError.message}`);
+      }
     }
     return false;
   }
-}
-
-/**
- * Validate Twilio webhook signature
- */
-function validateTwilioSignature(req) {
-  if (!VALIDATE_SIGNATURE) return true;
-  if (!TWILIO_AUTH_TOKEN) return true;
-
-  const signature = req.headers['x-twilio-signature'];
-  const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
-
-  return twilio.validateRequest(TWILIO_AUTH_TOKEN, signature, url, req.body);
 }
 
 /**
  * Check if sender is authorized
  */
-function isAuthorizedSender(from) {
-  if (!MY_WHATSAPP_NUMBER) return true; // No restriction if not configured
-  return from === MY_WHATSAPP_NUMBER;
+function isAuthorizedSender(chatId) {
+  if (!MY_TELEGRAM_CHAT_ID) return true; // No restriction if not configured
+  return String(chatId) === String(MY_TELEGRAM_CHAT_ID);
 }
 
-// Webhook endpoint - receives incoming WhatsApp messages
-app.post('/webhook', async (req, res) => {
-  log('Received webhook POST');
+// Set up message handler
+if (bot) {
+  bot.on('message', async (msg) => {
+    const chatId = msg.chat.id;
+    const text = msg.text;
+    const messageId = msg.message_id;
 
-  // Validate Twilio signature
-  if (!validateTwilioSignature(req)) {
-    log('Invalid Twilio signature');
-    return res.status(403).send('Forbidden');
-  }
+    log(`Received message from chat ${chatId}`);
 
-  const { From, Body, MessageSid } = req.body;
-
-  // Check authorization
-  if (!isAuthorizedSender(From)) {
-    log('Unauthorized sender');
-    return res.status(403).send('Unauthorized');
-  }
-
-  log(`Message from [SENDER]: ${redactPII(Body)}`);
-
-  const { command, args } = parseCommand(Body);
-
-  // Handle immediate response commands
-  const immediateResponse = getImmediateResponse(command);
-  if (immediateResponse && command !== 'task') {
-    await sendWhatsAppMessage(From, immediateResponse);
-    return res.status(200).send('OK');
-  }
-
-  // For tasks, add to heartbeat.md
-  if (command === 'task' && args) {
-    try {
-      const actionId = addActionToHeartbeat(args, MessageSid, From);
-      await sendWhatsAppMessage(From, `Got it! Task added as ${actionId}. I'll work on it soon!`);
-    } catch (error) {
-      await sendWhatsAppMessage(From, `Oops! Had trouble adding that task: ${error.message}`);
+    // Check authorization
+    if (!isAuthorizedSender(chatId)) {
+      log(`Unauthorized sender: ${chatId}`);
+      await sendTelegramMessage(chatId, 'Unauthorized. This bot only responds to its owner.');
+      return;
     }
-  }
 
-  res.status(200).send('OK');
-});
+    if (!text) {
+      log('Message has no text, ignoring');
+      return;
+    }
 
-// Twilio webhook verification (GET request)
-app.get('/webhook', (req, res) => {
-  log('Received webhook GET (verification)');
-  res.status(200).send('Webhook is active');
-});
+    log(`Message text: ${redactPII(text)}`);
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    twilioConfigured: !!twilioClient
+    const { command, args } = parseCommand(text);
+
+    // Handle immediate response commands
+    const immediateResponse = getImmediateResponse(command);
+    if (immediateResponse && command !== 'task') {
+      await sendTelegramMessage(chatId, immediateResponse);
+      return;
+    }
+
+    // For tasks, add to heartbeat.md
+    if (command === 'task' && args) {
+      try {
+        const actionId = addActionToHeartbeat(args, messageId, chatId);
+        await sendTelegramMessage(chatId, `Got it! Task added as \`${actionId}\`. I'll work on it soon!`);
+      } catch (error) {
+        await sendTelegramMessage(chatId, `Oops! Had trouble adding that task: ${error.message}`);
+      }
+    }
   });
-});
+
+  bot.on('polling_error', (error) => {
+    log(`[Polling Error] ${error.code}: ${error.message}`);
+  });
+
+  log('Telegram bot is listening for messages...');
+}
 
 /**
  * Watch responses.json and send pending responses
@@ -368,11 +323,12 @@ function watchResponses() {
 
       if (data.pending && data.pending.length > 0) {
         for (const response of data.pending) {
-          const to = response.to || MY_WHATSAPP_NUMBER;
-          if (to) {
-            await sendWhatsAppMessage(to, response.message);
+          // Support both 'to' (legacy) and 'chat_id' (new)
+          const chatId = response.chat_id || response.to || MY_TELEGRAM_CHAT_ID;
+          if (chatId) {
+            await sendTelegramMessage(chatId, response.message);
           } else {
-            log(`WARNING: Cannot send response for action ${response.action_id} - no recipient. Response must include 'to' field or MY_WHATSAPP_NUMBER must be set in .env`);
+            log(`WARNING: Cannot send response for action ${response.action_id} - no chat_id. Response must include 'chat_id' field or MY_TELEGRAM_CHAT_ID must be set in .env`);
           }
         }
 
@@ -388,12 +344,28 @@ function watchResponses() {
   log('Watching responses.json for changes');
 }
 
-// Start server
-app.listen(PORT, () => {
-  log(`Orko WhatsApp webhook server running on port ${PORT}`);
-  log(`Twilio configured: ${!!twilioClient}`);
-  log(`Signature validation: ${VALIDATE_SIGNATURE ? 'enabled' : 'disabled'}`);
-
-  // Start watching for responses
+// Start watching for responses
+if (bot) {
   watchResponses();
+  log('Orko Telegram bot is running!');
+  log(`Bot configured: ${!!bot}`);
+} else {
+  log('Bot not configured - check your .env file');
+}
+
+// Keep the process running
+process.on('SIGINT', () => {
+  log('Received SIGINT, shutting down...');
+  if (bot) {
+    bot.stopPolling();
+  }
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  log('Received SIGTERM, shutting down...');
+  if (bot) {
+    bot.stopPolling();
+  }
+  process.exit(0);
 });

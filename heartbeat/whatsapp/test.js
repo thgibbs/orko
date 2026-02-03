@@ -1,5 +1,5 @@
 /**
- * Test script for debugging Twilio WhatsApp messaging
+ * Test script for debugging Telegram bot messaging
  *
  * Usage: node test.js
  *
@@ -8,15 +8,13 @@
 
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 
-const twilio = require('twilio');
+const TelegramBot = require('node-telegram-bot-api');
 
 // Configuration
-const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
-const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
-const TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER;
-const MY_WHATSAPP_NUMBER = process.env.MY_WHATSAPP_NUMBER;
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const MY_TELEGRAM_CHAT_ID = process.env.MY_TELEGRAM_CHAT_ID;
 
-console.log('=== Twilio Configuration Debug ===\n');
+console.log('=== Telegram Configuration Debug ===\n');
 
 console.log('.env path:', require('path').join(__dirname, '..', '.env'));
 console.log('');
@@ -35,46 +33,45 @@ if (fs.existsSync(envPath)) {
 console.log('');
 console.log('=== Credentials ===\n');
 
-// Validate TWILIO_ACCOUNT_SID
-if (!TWILIO_ACCOUNT_SID) {
-  console.log('TWILIO_ACCOUNT_SID: NOT SET');
-} else if (TWILIO_ACCOUNT_SID.includes('xxxx')) {
-  console.log('TWILIO_ACCOUNT_SID: PLACEHOLDER (update with real value)');
-} else if (!TWILIO_ACCOUNT_SID.startsWith('AC')) {
-  console.log(`TWILIO_ACCOUNT_SID: INVALID FORMAT (should start with "AC", got "${TWILIO_ACCOUNT_SID.substring(0, 2)}")`);
+// Validate TELEGRAM_BOT_TOKEN
+if (!TELEGRAM_BOT_TOKEN) {
+  console.log('TELEGRAM_BOT_TOKEN: NOT SET');
+} else if (TELEGRAM_BOT_TOKEN.includes('1234567890') || TELEGRAM_BOT_TOKEN === '1234567890:ABCdefGHIjklMNOpqrsTUVwxyz') {
+  console.log('TELEGRAM_BOT_TOKEN: PLACEHOLDER (update with real value)');
+} else if (!TELEGRAM_BOT_TOKEN.includes(':')) {
+  console.log('TELEGRAM_BOT_TOKEN: INVALID FORMAT (should contain ":")');
 } else {
-  console.log(`TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID.substring(0, 8)}...${TWILIO_ACCOUNT_SID.slice(-4)} (looks valid)`);
+  console.log(`TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN.substring(0, 10)}...${TELEGRAM_BOT_TOKEN.slice(-4)} (looks valid)`);
 }
 
-// Validate TWILIO_AUTH_TOKEN
-if (!TWILIO_AUTH_TOKEN) {
-  console.log('TWILIO_AUTH_TOKEN: NOT SET');
-} else if (TWILIO_AUTH_TOKEN.includes('xxxx')) {
-  console.log('TWILIO_AUTH_TOKEN: PLACEHOLDER (update with real value)');
+// Validate MY_TELEGRAM_CHAT_ID
+if (!MY_TELEGRAM_CHAT_ID) {
+  console.log('MY_TELEGRAM_CHAT_ID: NOT SET');
+} else if (MY_TELEGRAM_CHAT_ID === '123456789') {
+  console.log('MY_TELEGRAM_CHAT_ID: PLACEHOLDER (update with real value)');
 } else {
-  console.log(`TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN.substring(0, 4)}...${TWILIO_AUTH_TOKEN.slice(-4)} (length: ${TWILIO_AUTH_TOKEN.length})`);
+  console.log(`MY_TELEGRAM_CHAT_ID: ${MY_TELEGRAM_CHAT_ID}`);
 }
 
-// Validate phone numbers
-console.log('');
-console.log('TWILIO_WHATSAPP_NUMBER:', TWILIO_WHATSAPP_NUMBER || 'NOT SET');
-console.log('MY_WHATSAPP_NUMBER:', MY_WHATSAPP_NUMBER || 'NOT SET');
-
-if (!MY_WHATSAPP_NUMBER || MY_WHATSAPP_NUMBER.includes('XXXXXXXXXX')) {
-  console.log('\nWARNING: MY_WHATSAPP_NUMBER not configured - cannot send test message');
-  console.log('Update MY_WHATSAPP_NUMBER in heartbeat/.env with your WhatsApp number');
+if (!MY_TELEGRAM_CHAT_ID || MY_TELEGRAM_CHAT_ID === '123456789') {
+  console.log('\nWARNING: MY_TELEGRAM_CHAT_ID not configured - cannot send test message');
+  console.log('To get your chat ID:');
+  console.log('1. Start a chat with your bot');
+  console.log('2. Send any message to it');
+  console.log(`3. Run: curl https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates`);
+  console.log('4. Find your chat.id in the response');
   process.exit(1);
 }
 
 console.log('');
-console.log('=== Creating Twilio Client ===\n');
+console.log('=== Creating Telegram Bot ===\n');
 
-let twilioClient = null;
+let bot = null;
 try {
-  twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
-  console.log('Twilio client created successfully');
+  bot = new TelegramBot(TELEGRAM_BOT_TOKEN, { polling: false });
+  console.log('Telegram bot created successfully');
 } catch (error) {
-  console.log('Failed to create Twilio client:', error.message);
+  console.log('Failed to create Telegram bot:', error.message);
   process.exit(1);
 }
 
@@ -82,28 +79,23 @@ console.log('');
 console.log('=== Sending Test Message ===\n');
 
 async function sendTestMessage() {
-  const testMessage = `🧪 Test message from Orko WhatsApp server\n\nTimestamp: ${new Date().toISOString()}\n\nIf you see this, Twilio is configured correctly!`;
+  const testMessage = `Test message from Orko Telegram bot\n\nTimestamp: ${new Date().toISOString()}\n\nIf you see this, Telegram is configured correctly!`;
 
-  console.log(`From: ${TWILIO_WHATSAPP_NUMBER}`);
-  console.log(`To: ${MY_WHATSAPP_NUMBER}`);
+  console.log(`Chat ID: ${MY_TELEGRAM_CHAT_ID}`);
   console.log(`Message: ${testMessage.substring(0, 50)}...`);
   console.log('');
 
   try {
-    console.log('Calling twilioClient.messages.create()...');
-    const message = await twilioClient.messages.create({
-      from: TWILIO_WHATSAPP_NUMBER,
-      to: MY_WHATSAPP_NUMBER,
-      body: testMessage
-    });
+    console.log('Calling bot.sendMessage()...');
+    const message = await bot.sendMessage(MY_TELEGRAM_CHAT_ID, testMessage);
 
     console.log('');
     console.log('=== SUCCESS ===');
     console.log('');
-    console.log('Message SID:', message.sid);
-    console.log('Status:', message.status);
+    console.log('Message ID:', message.message_id);
+    console.log('Chat ID:', message.chat.id);
     console.log('');
-    console.log('Check your WhatsApp for the test message!');
+    console.log('Check your Telegram for the test message!');
 
   } catch (error) {
     console.log('');
@@ -111,32 +103,28 @@ async function sendTestMessage() {
     console.log('');
     console.log('Error name:', error.name);
     console.log('Error code:', error.code);
-    console.log('Error status:', error.status);
     console.log('Error message:', error.message);
-
-    if (error.moreInfo) {
-      console.log('More info:', error.moreInfo);
-    }
 
     console.log('');
     console.log('=== Troubleshooting ===');
     console.log('');
 
-    if (error.code === 20003 || error.message === 'Authenticate') {
-      console.log('Authentication failed. Check:');
-      console.log('1. TWILIO_ACCOUNT_SID is correct (starts with AC)');
-      console.log('2. TWILIO_AUTH_TOKEN is correct (from Twilio Console)');
-      console.log('3. Credentials are for the correct account');
-    } else if (error.code === 21608) {
-      console.log('The "from" number is not a valid WhatsApp-enabled number.');
-      console.log('Check TWILIO_WHATSAPP_NUMBER in your .env');
-    } else if (error.code === 21211) {
-      console.log('Invalid "to" phone number format.');
-      console.log('MY_WHATSAPP_NUMBER should be: whatsapp:+1XXXXXXXXXX');
-    } else if (error.code === 63007) {
-      console.log('WhatsApp sandbox not joined or 24-hour window expired.');
-      console.log('1. Text "join <sandbox-word>" to your Twilio sandbox number');
-      console.log('2. Or upgrade to a production WhatsApp number');
+    if (error.code === 'ETELEGRAM') {
+      if (error.message.includes('401')) {
+        console.log('Authentication failed. Check:');
+        console.log('1. TELEGRAM_BOT_TOKEN is correct');
+        console.log('2. Token was copied completely (no missing characters)');
+        console.log('3. Bot has not been revoked in @BotFather');
+      } else if (error.message.includes('400') && error.message.includes('chat not found')) {
+        console.log('Chat not found. Check:');
+        console.log('1. MY_TELEGRAM_CHAT_ID is correct');
+        console.log('2. You have started a chat with the bot (send /start)');
+        console.log('3. The chat ID is numeric (not a username)');
+      } else if (error.message.includes('403')) {
+        console.log('Bot was blocked by user or cannot access chat.');
+        console.log('1. Make sure you have not blocked the bot');
+        console.log('2. Send a message to the bot to reactivate');
+      }
     }
 
     process.exit(1);
